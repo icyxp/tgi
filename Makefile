@@ -1,3 +1,5 @@
+version?=1.0.1
+
 install-server:
 	cd server && make install
 
@@ -50,3 +52,15 @@ run-falcon-7b-instruct-quantize:
 
 clean:
 	rm -rf target aml
+
+image-kbuilder:
+	@docker build -t="quay.io/icyboy/llm-inference:tgi-kernel-builder-${version}" -f Dockerfile.kernel-builder	
+	@docker push quay.io/icyboy/llm-inference:tgi-kernel-builder-${version}
+
+image-non-flashv2:
+	@docker build -t="quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-${version}" -f Dockerfile
+	@docker push quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-${version}	
+
+image-tgi:
+	@docker build -t="quay.io/icyboy/llm-inference:tgi-${version}" -f Dockerfile.att-v2
+	@docker push quay.io/icyboy/llm-inference:tgi-${version}	
