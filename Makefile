@@ -54,13 +54,14 @@ clean:
 	rm -rf target aml
 
 image-kbuilder:
-	@docker build -f Dockerfile.kernel-builder -t="quay.io/icyboy/llm-inference:tgi-kernel-builder-${version}"
+	@docker build -f Dockerfile.kernel-builder -t="quay.io/icyboy/llm-inference:tgi-kernel-builder-${version}" .
 	@docker push quay.io/icyboy/llm-inference:tgi-kernel-builder-${version}
 
 image-non-flashv2:
-	@docker build -f Dockerfile -t="quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-${version}"
+	@docker build -f Dockerfile -t="quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-${version}" .
 	@docker push quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-${version}	
 
 image-tgi:
-	@docker build -f Dockerfile.att-v2 -t="quay.io/icyboy/llm-inference:tgi-${version}"
+	@sed -i 's/${version}/{VERSION}/g' Dockerfile.att-v2
+	@docker build -f Dockerfile.att-v2 -t="quay.io/icyboy/llm-inference:tgi-${version}" .
 	@docker push quay.io/icyboy/llm-inference:tgi-${version}	

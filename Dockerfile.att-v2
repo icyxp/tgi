@@ -1,5 +1,5 @@
 # FlashAttention-2 currently supports: Ampere, Ada, or Hopper GPUs (e.g., A100, RTX 3090, RTX 4090, H100). 
-FROM quay.io/icyboy/llm-inference:tgi-kernel-builder-1.0.1 as flash-att-v2-builder
+FROM quay.io/icyboy/llm-inference:tgi-kernel-builder-{VERSION} as flash-att-v2-builder
 
 WORKDIR /usr/src
 
@@ -8,7 +8,7 @@ COPY server/Makefile-flash-att-v2 Makefile
 # Build specific version of flash attention v2
 RUN make build-flash-attention-v2
 
-FROM quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-1.0.1-05dd14f
+FROM quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-{VERSION}
 
 COPY --from=flash-att-v2-builder /usr/src/flash-attention-v2/build/lib.linux-x86_64-cpython-39 /opt/conda/lib/python3.9/site-packages
 
