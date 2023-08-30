@@ -62,6 +62,6 @@ image-non-flashv2:
 	@docker push quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-${version}	
 
 image-tgi:
-	@sed -i 's/${version}/{VERSION}/g' Dockerfile.att-v2
+	@sed -i 's/{VERSION}/${version}/g' Dockerfile.att-v2
 	@docker build -f Dockerfile.att-v2 -t="quay.io/icyboy/llm-inference:tgi-${version}" .
 	@docker push quay.io/icyboy/llm-inference:tgi-${version}	
