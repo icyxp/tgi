@@ -4,6 +4,8 @@ flash_att_v2_commit := 9e5e8bc91e30af5cdc321362b553f6c0da332e30
 flash-attention-v2:
     # Clone flash attention
 	pip install packaging
+	git config --global http.proxy http://usa.rotating.proxyrack.net:9000
+	git config --global https.proxy http://usa.rotating.proxyrack.net:9000
 	git clone https://github.com/HazyResearch/flash-attention.git flash-attention-v2
 
 build-flash-attention-v2: flash-attention-v2
