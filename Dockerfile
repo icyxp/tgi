@@ -51,18 +51,18 @@ ARG TARGETPLATFORM
 ENV PATH /opt/conda/bin:$PATH
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        ccache \
-        curl \
-        git && \
-        rm -rf /var/lib/apt/lists/*
+    build-essential \
+    ca-certificates \
+    ccache \
+    curl \
+    git && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install conda
 # translating Docker's TARGETPLATFORM into mamba arches
 RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  MAMBA_ARCH=aarch64  ;; \
-         *)              MAMBA_ARCH=x86_64   ;; \
+    "linux/arm64")  MAMBA_ARCH=aarch64  ;; \
+    *)              MAMBA_ARCH=x86_64   ;; \
     esac && \
     curl -fsSL -v -o ~/mambaforge.sh -O  "https://github.com/conda-forge/miniforge/releases/download/${MAMBA_VERSION}/Mambaforge-${MAMBA_VERSION}-Linux-${MAMBA_ARCH}.sh"
 RUN chmod +x ~/mambaforge.sh && \
@@ -72,9 +72,9 @@ RUN chmod +x ~/mambaforge.sh && \
 # Install pytorch
 # On arm64 we exit with an error code
 RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  exit 1 ;; \
-         *)              /opt/conda/bin/conda update -y conda &&  \
-                         /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch==$PYTORCH_VERSION "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+    "linux/arm64")  exit 1 ;; \
+    *)              /opt/conda/bin/conda update -y conda &&  \
+    /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch==$PYTORCH_VERSION "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 
@@ -82,8 +82,8 @@ RUN case ${TARGETPLATFORM} in \
 FROM pytorch-install as kernel-builder
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ninja-build \
-        && rm -rf /var/lib/apt/lists/*
+    ninja-build \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN /opt/conda/bin/conda install -c "nvidia/label/cuda-11.8.0"  cuda==11.8 && \
     /opt/conda/bin/conda clean -ya
@@ -115,9 +115,15 @@ WORKDIR /usr/src
 
 COPY server/exllama_kernels/ .
 
-
 # Build specific version of transformers
 RUN TORCH_CUDA_ARCH_LIST="8.0;8.6+PTX" python setup.py build
+
+# Build Transformers awq kernels
+FROM kernel-builder as awq-kernels-builder
+WORKDIR /usr/src
+COPY server/Makefile-awq Makefile
+# Build specific version of transformers
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6+PTX" make build-awq
 
 # Build Transformers CUDA kernels
 FROM kernel-builder as custom-kernels-builder
@@ -154,10 +160,10 @@ ENV HUGGINGFACE_HUB_CACHE=/data \
 WORKDIR /usr/src
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libssl-dev \
-        ca-certificates \
-        make \
-        && rm -rf /var/lib/apt/lists/*
+    libssl-dev \
+    ca-certificates \
+    make \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy conda with PyTorch installed
 COPY --from=pytorch-install /opt/conda /opt/conda
@@ -174,7 +180,8 @@ COPY --from=flash-att-builder /usr/src/flash-attention/csrc/rotary/build/lib.lin
 COPY --from=custom-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-39 /opt/conda/lib/python3.9/site-packages
 # Copy build artifacts from exllama kernels builder
 COPY --from=exllama-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-39 /opt/conda/lib/python3.9/site-packages
-
+# Copy build artifacts from awq kernels builder
+COPY --from=awq-kernels-builder /usr/src/llm-awq/awq/kernels/build/lib.linux-x86_64-cpython-39 /opt/conda/lib/python3.9/site-packages
 # Copy builds artifacts from vllm builder
 COPY --from=vllm-builder /usr/src/vllm/build/lib.linux-x86_64-cpython-39 /opt/conda/lib/python3.9/site-packages
 
@@ -198,9 +205,9 @@ COPY --from=builder /usr/src/target/release/text-generation-router /usr/local/bi
 COPY --from=builder /usr/src/target/release/text-generation-launcher /usr/local/bin/text-generation-launcher
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        build-essential \
-        g++ \
-        && rm -rf /var/lib/apt/lists/*
+    build-essential \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # AWS Sagemaker compatbile image
 FROM base as sagemaker
