@@ -6,6 +6,7 @@ use text_generation_client::{NextTokenChooserParameters, StoppingCriteriaParamet
 use thiserror::Error;
 use tokenizers::tokenizer::Tokenizer;
 use tokenizers::TruncationDirection;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::{instrument, Span};
 
@@ -19,7 +20,7 @@ pub struct Validation {
     max_input_length: usize,
     max_total_tokens: usize,
     /// Channel to communicate with the background tokenization task
-    sender: Option<flume::Sender<TokenizerRequest>>,
+    sender: Option<mpsc::UnboundedSender<TokenizerRequest>>,
 }
 
 impl Validation {
@@ -34,19 +35,25 @@ impl Validation {
     ) -> Self {
         // If we have a fast tokenizer
         let sender = if let Some(tokenizer) = tokenizer {
-            // Create channel
-            let (validation_sender, validation_receiver) = flume::unbounded();
+            // Create round robin channel
+            let (validation_sender, validation_round_robin_receiver) = mpsc::unbounded_channel();
+            let mut senders = Vec::with_capacity(workers);
 
             // Create workers
             for _ in 0..workers {
                 let tokenizer_clone = tokenizer.clone();
-                let receiver_clone = validation_receiver.clone();
+                let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
+                senders.push(tokenizer_sender);
 
                 // Spawn worker
                 tokio::task::spawn_blocking(move || {
-                    tokenizer_worker(tokenizer_clone, receiver_clone)
+                    tokenizer_worker(tokenizer_clone, tokenizer_receiver)
                 });
             }
+
+            // Create tokenization round robin task
+            tokio::spawn(round_robin_task(validation_round_robin_receiver, senders));
+
             Some(validation_sender)
         } else {
             None
@@ -88,7 +95,7 @@ impl Validation {
                 max_new_tokens
             } else {
                 self.max_total_tokens.saturating_sub(input_length) as u32
-            };            
+            };
             let total_tokens = input_length + max_new_tokens as usize;
 
             // Validate MaxTotalTokens
@@ -118,12 +125,10 @@ impl Validation {
             // We make sure that truncate + max_new_tokens <= self.max_total_tokens
             let max_new_tokens: u32 = if let Some(max_new_tokens) = max_new_tokens {
                 max_new_tokens
+            } else if let Some(truncate) = truncate {
+                self.max_total_tokens.saturating_sub(truncate) as u32
             } else {
-                if let Some(truncate) = truncate {
-                    self.max_total_tokens.saturating_sub(truncate) as u32
-                } else {
-                    return Err(ValidationError::UnsetMaxNewTokens);
-                }
+                return Err(ValidationError::UnsetMaxNewTokens);
             };
             let input_length = truncate.unwrap_or(self.max_input_length);
 
@@ -237,13 +242,13 @@ impl Validation {
         };
 
         let top_n_tokens = top_n_tokens
-        .map(|value| {
-            if value > self.max_top_n_tokens {
-                return Err(ValidationError::TopNTokens(self.max_top_n_tokens, value));
-            }
-            Ok(value)
-        })
-        .unwrap_or(Ok(0))?;
+            .map(|value| {
+                if value > self.max_top_n_tokens {
+                    return Err(ValidationError::TopNTokens(self.max_top_n_tokens, value));
+                }
+                Ok(value)
+            })
+            .unwrap_or(Ok(0))?;
 
         // Check if inputs is empty
         if request.inputs.is_empty() {
@@ -309,10 +314,25 @@ impl Validation {
     }
 }
 
+/// Round robin tokenization task
+async fn round_robin_task(
+    mut receiver: mpsc::UnboundedReceiver<TokenizerRequest>,
+    senders: Vec<mpsc::UnboundedSender<TokenizerRequest>>,
+) {
+    loop {
+        for sender in &senders {
+            match receiver.recv().await {
+                None => return,
+                Some(request) => sender.send(request).unwrap(),
+            };
+        }
+    }
+}
+
 /// Start tokenization workers
-fn tokenizer_worker(tokenizer: Tokenizer, receiver: flume::Receiver<TokenizerRequest>) {
+fn tokenizer_worker(tokenizer: Tokenizer, mut receiver: mpsc::UnboundedReceiver<TokenizerRequest>) {
     // Loop over requests
-    while let Ok(((inputs, truncate), response_tx, parent_span)) = receiver.recv() {
+    while let Some(((inputs, truncate), response_tx, parent_span)) = receiver.blocking_recv() {
         parent_span.in_scope(|| {
             response_tx
                 .send(prepare_input(inputs, truncate, &tokenizer))
@@ -572,72 +592,72 @@ mod tests {
         // top_p == 1.0 is invalid for users to ask for but it's the default resolved value.
         assert_eq!(valid_request.parameters.top_p, 1.0);
     }
-}
 
-#[tokio::test]
-async fn test_validation_top_n_tokens() {
-    let tokenizer = Some(get_tokenizer().await);
-    let max_best_of = 2;
-    let max_stop_sequences = 3;
-    let max_top_n_tokens = 4;
-    let max_input_length = 5;
-    let max_total_tokens = 6;
-    let workers = 1;
-    let validation = Validation::new(
-        workers,
-        tokenizer,
-        max_best_of,
-        max_stop_sequences,
-        max_top_n_tokens,
-        max_input_length,
-        max_total_tokens,
-    );
-    match validation
-        .validate(GenerateRequest {
-            inputs: "Hello".to_string(),
-            parameters: GenerateParameters {
-                top_n_tokens: Some(5),
-                ..default_parameters()
-            },
-        })
-        .await
-    {
-        Err(ValidationError::TopNTokens(4, 5)) => (),
-        _ => panic!("Unexpected top_n_tokens"),
+    #[tokio::test]
+    async fn test_validation_top_n_tokens() {
+        let tokenizer = Some(get_tokenizer().await);
+        let max_best_of = 2;
+        let max_stop_sequences = 3;
+        let max_top_n_tokens = 4;
+        let max_input_length = 5;
+        let max_total_tokens = 6;
+        let workers = 1;
+        let validation = Validation::new(
+            workers,
+            tokenizer,
+            max_best_of,
+            max_stop_sequences,
+            max_top_n_tokens,
+            max_input_length,
+            max_total_tokens,
+        );
+        match validation
+            .validate(GenerateRequest {
+                inputs: "Hello".to_string(),
+                parameters: GenerateParameters {
+                    top_n_tokens: Some(5),
+                    ..default_parameters()
+                },
+            })
+            .await
+        {
+            Err(ValidationError::TopNTokens(4, 5)) => (),
+            _ => panic!("Unexpected top_n_tokens"),
+        }
+
+        validation
+            .validate(GenerateRequest {
+                inputs: "Hello".to_string(),
+                parameters: GenerateParameters {
+                    top_n_tokens: Some(4),
+                    ..default_parameters()
+                },
+            })
+            .await
+            .unwrap();
+
+        validation
+            .validate(GenerateRequest {
+                inputs: "Hello".to_string(),
+                parameters: GenerateParameters {
+                    top_n_tokens: Some(0),
+                    ..default_parameters()
+                },
+            })
+            .await
+            .unwrap();
+
+        let valid_request = validation
+            .validate(GenerateRequest {
+                inputs: "Hello".to_string(),
+                parameters: GenerateParameters {
+                    top_n_tokens: None,
+                    ..default_parameters()
+                },
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(valid_request.top_n_tokens, 0);
     }
-
-    validation
-        .validate(GenerateRequest {
-            inputs: "Hello".to_string(),
-            parameters: GenerateParameters {
-                top_n_tokens: Some(4),
-                ..default_parameters()
-            },
-        })
-        .await
-        .unwrap();
-
-    validation
-        .validate(GenerateRequest {
-            inputs: "Hello".to_string(),
-            parameters: GenerateParameters {
-                top_n_tokens: Some(0),
-                ..default_parameters()
-            },
-        })
-        .await
-        .unwrap();
-
-    let valid_request = validation
-        .validate(GenerateRequest {
-            inputs: "Hello".to_string(),
-            parameters: GenerateParameters {
-                top_n_tokens: None,
-                ..default_parameters()
-            },
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(valid_request.top_n_tokens, 0);
 }
