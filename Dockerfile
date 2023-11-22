@@ -116,21 +116,21 @@ WORKDIR /usr/src
 COPY server/exllama_kernels/ .
 
 # Build specific version of transformers
-RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX" python setup.py build
+RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX;8.9" python setup.py build
 
 # Build Transformers awq kernels
 FROM kernel-builder as awq-kernels-builder
 WORKDIR /usr/src
 COPY server/Makefile-awq Makefile
 # Build specific version of transformers
-RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX" make build-awq
+RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX;8.9" make build-awq
 
 # Build eetq kernels
 FROM kernel-builder as eetq-kernels-builder
 WORKDIR /usr/src
 COPY server/Makefile-eetq Makefile
 # Build specific version of transformers
-RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX" make build-eetq
+RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX;8.9" make build-eetq
 
 # Build Transformers CUDA kernels
 FROM kernel-builder as custom-kernels-builder
