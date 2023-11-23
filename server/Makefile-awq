@@ -1,8 +1,9 @@
-awq_commit := f084f40bd996f3cf3a0633c1ad7d9d476c318aaa
+#awq_commit := f084f40bd996f3cf3a0633c1ad7d9d476c318aaa
+awq_commit := 61b2cbf5337ff24fc4e464276a7d29e58aa716c5
 
 awq: 
 	rm -rf llm-awq
-	git clone https://github.com/mit-han-lab/llm-awq
+	git clone https://github.com/icyxp/llm-awq.git
 
 build-awq: awq
 	cd llm-awq/ && git fetch && git checkout $(awq_commit)
