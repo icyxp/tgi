@@ -41,6 +41,7 @@ FROM nvidia/cuda:12.1.0-devel-ubuntu20.04 as pytorch-install
 
 ARG PYTORCH_VERSION=2.1.1
 ARG PYTHON_VERSION=3.10
+# Keep in sync with `server/pyproject.toml
 ARG CUDA_VERSION=12.1
 ARG MAMBA_VERSION=23.3.1-1
 ARG CUDA_CHANNEL=nvidia
@@ -51,18 +52,18 @@ ARG TARGETPLATFORM
 ENV PATH /opt/conda/bin:$PATH
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    ccache \
-    curl \
-    git && \
-    rm -rf /var/lib/apt/lists/*
+        build-essential \
+        ca-certificates \
+        ccache \
+        curl \
+        git && \
+        rm -rf /var/lib/apt/lists/*
 
 # Install conda
 # translating Docker's TARGETPLATFORM into mamba arches
 RUN case ${TARGETPLATFORM} in \
-    "linux/arm64")  MAMBA_ARCH=aarch64  ;; \
-    *)              MAMBA_ARCH=x86_64   ;; \
+         "linux/arm64")  MAMBA_ARCH=aarch64  ;; \
+         *)              MAMBA_ARCH=x86_64   ;; \
     esac && \
     curl -fsSL -v -o ~/mambaforge.sh -O  "https://github.com/conda-forge/miniforge/releases/download/${MAMBA_VERSION}/Mambaforge-${MAMBA_VERSION}-Linux-${MAMBA_ARCH}.sh"
 RUN chmod +x ~/mambaforge.sh && \
@@ -84,8 +85,8 @@ FROM pytorch-install as kernel-builder
 ARG MAX_JOBS=8
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ninja-build \
-    && rm -rf /var/lib/apt/lists/*
+        ninja-build \
+        && rm -rf /var/lib/apt/lists/*
 
 # Build Flash Attention CUDA kernels
 FROM kernel-builder as flash-att-builder
