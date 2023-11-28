@@ -114,7 +114,7 @@ WORKDIR /usr/src
 
 COPY server/exllama_kernels/ .
 
-RUN TORCH_CUDA_ARCH_LIST=""7.5;8.0;8.6+PTX;8.9" python setup.py build
+RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX;8.9" python setup.py build
 
 # Build Transformers exllama kernels
 FROM kernel-builder as exllamav2-kernels-builder
