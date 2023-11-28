@@ -2,7 +2,7 @@ flash_att_commit := 6d48e14a6c2f551db96f0badc658a6279a929df3
 
 flash-attention:
     # Clone flash attention
-	pip install packaging
+	pip install -U packaging ninja  --no-cache-dir
 	git clone https://github.com/HazyResearch/flash-attention.git
 
 build-flash-attention: flash-attention

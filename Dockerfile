@@ -156,7 +156,7 @@ WORKDIR /usr/src
 COPY server/Makefile-vllm Makefile
 
 # Build specific version of vllm
-RUN make build-vllm
+RUN make build-vllm-cuda
 
 # Text Generation Inference base image
 FROM nvidia/cuda:12.1.0-base-ubuntu20.04 as base
@@ -211,7 +211,7 @@ COPY server server
 COPY server/Makefile server/Makefile
 RUN cd server && \
     make gen-server && \
-    pip install -r requirements.txt && \
+    pip install -r requirements_cuda.txt && \
     pip install ".[bnb, accelerate, quantize, peft]" --no-cache-dir
 
 # Install benchmarker
@@ -226,7 +226,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# AWS Sagemaker compatbile image
+# AWS Sagemaker compatible image
 FROM base as sagemaker
 
 COPY sagemaker-entrypoint.sh entrypoint.sh

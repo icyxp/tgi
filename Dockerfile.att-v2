@@ -6,7 +6,7 @@ WORKDIR /usr/src
 COPY server/Makefile-flash-att-v2 Makefile
 
 # Build specific version of flash attention v2
-RUN make build-flash-attention-v2
+RUN make build-flash-attention-v2-cuda
 
 FROM quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-{VERSION}
 
