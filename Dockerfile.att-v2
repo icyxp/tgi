@@ -10,7 +10,7 @@ RUN make build-flash-attention-v2
 
 FROM quay.io/icyboy/llm-inference:tgi-no-flash-att-v2-{VERSION}
 
-COPY --from=flash-att-v2-builder /usr/src/flash-attention-v2/build/lib.linux-x86_64-cpython-39 /opt/conda/lib/python3.9/site-packages
+COPY --from=flash-att-v2-builder /usr/src/flash-attention-v2/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 
 ENTRYPOINT ["text-generation-launcher"]
 
