@@ -106,13 +106,11 @@ RUN make build-flash-attention
 #COPY server/Makefile-flash-att-v2 Makefile
 
 # Build specific version of flash attention v2
-#RUN make build-flash-attention-v2
+#RUN make build-flash-attention-v2-cuda
 
 # Build Transformers exllama kernels
 FROM kernel-builder as exllama-kernels-builder
-
 WORKDIR /usr/src
-
 COPY server/exllama_kernels/ .
 
 RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX;8.9" python setup.py build
@@ -141,11 +139,8 @@ RUN TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6+PTX;8.9" make build-eetq
 
 # Build Transformers CUDA kernels
 FROM kernel-builder as custom-kernels-builder
-
 WORKDIR /usr/src
-
 COPY server/custom_kernels/ .
-
 # Build specific version of transformers
 RUN python setup.py build
 
@@ -174,11 +169,11 @@ ENV HUGGINGFACE_HUB_CACHE=/data \
 WORKDIR /usr/src
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    libssl-dev \
-    ca-certificates \
-    make \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+        libssl-dev \
+        ca-certificates \
+        make \
+        curl \
+        && rm -rf /var/lib/apt/lists/*
 
 # Copy conda with PyTorch installed
 COPY --from=pytorch-install /opt/conda /opt/conda
@@ -187,19 +182,21 @@ COPY --from=pytorch-install /opt/conda /opt/conda
 COPY --from=flash-att-builder /usr/src/flash-attention/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 COPY --from=flash-att-builder /usr/src/flash-attention/csrc/layer_norm/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 COPY --from=flash-att-builder /usr/src/flash-attention/csrc/rotary/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
-# Copy build artifacts from flash attention v2 builder
-#COPY --from=flash-att-v2-builder /usr/src/flash-attention-v2/build/lib.linux-x86_64-cpython-39 /opt/conda/lib/python3.9/site-packages
 
-# Copy build artifacts from exllamav2 kernels builder
-COPY --from=exllamav2-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
+# Copy build artifacts from flash attention v2 builder
+#COPY --from=flash-att-v2-builder /usr/src/flash-attention-v2/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
+
 # Copy build artifacts from custom kernels builder
 COPY --from=custom-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 # Copy build artifacts from exllama kernels builder
 COPY --from=exllama-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
+# Copy build artifacts from exllamav2 kernels builder
+COPY --from=exllamav2-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 # Copy build artifacts from awq kernels builder
 COPY --from=awq-kernels-builder /usr/src/llm-awq/awq/kernels/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 # Copy build artifacts from eetq kernels builder
 COPY --from=eetq-kernels-builder /usr/src/eetq/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
+
 # Copy builds artifacts from vllm builder
 COPY --from=vllm-builder /usr/src/vllm/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 
@@ -223,9 +220,9 @@ COPY --from=builder /usr/src/target/release/text-generation-router /usr/local/bi
 COPY --from=builder /usr/src/target/release/text-generation-launcher /usr/local/bin/text-generation-launcher
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+        build-essential \
+        g++ \
+        && rm -rf /var/lib/apt/lists/*
 
 # AWS Sagemaker compatible image
 FROM base as sagemaker
