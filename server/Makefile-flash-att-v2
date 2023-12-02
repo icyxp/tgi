@@ -4,8 +4,6 @@ flash_att_v2_commit_rocm := 8736558c287ff2ef28b24878e42828c595ac3e69
 
 flash-attention-v2-cuda:
   # Clone flash attention
-  	git config --global http.proxy http://172.16.0.1:8118
-	git config --global https.proxy http://172.16.0.1:8118
 	pip install -U packaging ninja  --no-cache-dir
 	git clone https://github.com/HazyResearch/flash-attention.git flash-attention-v2
 
@@ -19,8 +17,6 @@ install-flash-attention-v2-cuda: build-flash-attention-v2-cuda
 
 flash-attention-v2-rocm:
   # Clone flash attention
-  	git config --global http.proxy http://172.16.0.1:8118
-	git config --global https.proxy http://172.16.0.1:8118  
 	pip install -U packaging ninja  --no-cache-dir
 	git clone https://github.com/fxmarty/flash-attention-rocm flash-attention-v2
 
