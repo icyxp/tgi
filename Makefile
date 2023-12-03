@@ -53,6 +53,10 @@ run-falcon-7b-instruct-quantize:
 clean:
 	rm -rf target aml
 
+image-builder:
+	@docker build -f Dockerfile.builder -t="quay.io/icyboy/llm-inference:tgi-builder-${version}" .
+	@docker push quay.io/icyboy/llm-inference:tgi-builder-${version}
+
 image-kbuilder:
 	@docker build -f Dockerfile.kernel-builder -t="quay.io/icyboy/llm-inference:tgi-kernel-builder-${version}" .
 	@docker push quay.io/icyboy/llm-inference:tgi-kernel-builder-${version}
@@ -64,6 +68,7 @@ image-non-flashv2:
 image-continue:
 	@sed -i 's/{VERSION}/${version}/g' Dockerfile.continue
 	@docker build -f Dockerfile.continue -t="quay.io/icyboy/llm-inference:tgi-${version}" .
+	@docker push quay.io/icyboy/llm-inference:tgi-${version}
 	
 image-tgi:
 	@sed -i 's/{VERSION}/${version}/g' Dockerfile.att-v2
