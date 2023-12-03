@@ -1,4 +1,4 @@
-FROM quay.io/icyboy/llm-inference:tgi-builder-1.2.0 AS builder
+FROM quay.io/icyboy/llm-inference:tgi-builder-{VERSION} AS builder
 
 # Python builder
 # Adapted from: https://github.com/pytorch/pytorch/blob/master/Dockerfile
