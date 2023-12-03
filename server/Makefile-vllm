@@ -9,7 +9,9 @@ build-vllm-rocm: BRANCH=rotary-no-positions-split-cos-sin
 build-vllm-rocm: build-vllm
 
 vllm:
-  # Clone vllm
+	# Clone vllm
+	git config --global http.proxy http_proxy=http://172.16.0.1:8118
+	git config --global https.proxy http_proxy=http://172.16.0.1:8118
 	pip install -U ninja packaging --no-cache-dir
 	git clone --single-branch --branch $(BRANCH) $(REPOSITORY) vllm
 

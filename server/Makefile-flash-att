@@ -1,8 +1,10 @@
 flash_att_commit := 3a9bfd076f98746c73362328958dbc68d145fbec
 
 flash-attention:
-    # Clone flash attention
-	pip install -U packaging ninja  --no-cache-dir
+	# Clone flash attention
+	git config --global http.proxy http_proxy=http://172.16.0.1:8118
+	git config --global https.proxy http_proxy=http://172.16.0.1:8118
+	pip install -U packaging ninja  --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
 	git clone https://github.com/HazyResearch/flash-attention.git
 
 build-flash-attention: flash-attention

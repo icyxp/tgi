@@ -3,6 +3,8 @@ awq_commit := 61b2cbf5337ff24fc4e464276a7d29e58aa716c5
 
 awq: 
 	rm -rf llm-awq
+	git config --global http.proxy http_proxy=http://172.16.0.1:8118
+	git config --global https.proxy http_proxy=http://172.16.0.1:8118
 	git clone https://github.com/icyxp/llm-awq.git
 
 build-awq: awq
