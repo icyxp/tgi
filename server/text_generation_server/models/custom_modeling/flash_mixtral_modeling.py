@@ -29,7 +29,10 @@ from transformers.configuration_utils import PretrainedConfig
 from typing import Optional, List, Tuple
 
 from text_generation_server.utils import paged_attention, flash_attn
-from text_generation_server.utils.flash_attn import HAS_FLASH_ATTN_V2_ROCM, HAS_FLASH_ATTN_V2_CUDA
+from text_generation_server.utils.flash_attn import (
+    HAS_FLASH_ATTN_V2_ROCM,
+    HAS_FLASH_ATTN_V2_CUDA,
+)
 from text_generation_server.utils.layers import (
     FastLinear,
     FastRMSNorm,
@@ -59,28 +62,28 @@ class MixtralConfig(PretrainedConfig):
     model_type = "mixtral"
 
     def __init__(
-            self,
-            vocab_size=32000,
-            hidden_size=4096,
-            intermediate_size=14336,
-            num_hidden_layers=32,
-            num_attention_heads=32,
-            num_key_value_heads=8,
-            hidden_act="silu",
-            max_position_embeddings=4096 * 32,
-            initializer_range=0.02,
-            rms_norm_eps=1e-05,
-            use_cache=True,
-            pad_token_id=None,
-            bos_token_id=1,
-            eos_token_id=2,
-            pretraining_tp=1,
-            tie_word_embeddings=False,
-            rope_theta=10000.0,
-            sliding_window=4096,
-            num_experts_per_tok=2,
-            num_local_experts=8,
-            **kwargs,
+        self,
+        vocab_size=32000,
+        hidden_size=4096,
+        intermediate_size=14336,
+        num_hidden_layers=32,
+        num_attention_heads=32,
+        num_key_value_heads=8,
+        hidden_act="silu",
+        max_position_embeddings=4096 * 32,
+        initializer_range=0.02,
+        rms_norm_eps=1e-05,
+        use_cache=True,
+        pad_token_id=None,
+        bos_token_id=1,
+        eos_token_id=2,
+        pretraining_tp=1,
+        tie_word_embeddings=False,
+        rope_theta=10000.0,
+        sliding_window=4096,
+        num_experts_per_tok=2,
+        num_local_experts=8,
+        **kwargs,
     ):
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
@@ -166,16 +169,18 @@ def _load_experts(config, prefix, mat, weights):
     rank = weights.process_group.rank()
 
     assert (
-            config.intermediate_size % world_size == 0
+        config.intermediate_size % world_size == 0
     ), f"The chosen size {config.intermediate_size} is not compatible with sharding on {world_size} shards"
 
     block_size = config.intermediate_size // world_size
     start = rank * block_size
     stop = (rank + 1) * block_size
 
-    tensor = torch.empty((config.num_local_experts * block_size, config.hidden_size),
-                         dtype=weights.dtype,
-                         device=weights.device)
+    tensor = torch.empty(
+        (config.num_local_experts * block_size, config.hidden_size),
+        dtype=weights.dtype,
+        device=weights.device,
+    )
 
     for i in range(config.num_local_experts):
         slice_ = weights._get_slice(f"{prefix}.{i}.{mat}.weight")
@@ -184,16 +189,18 @@ def _load_experts(config, prefix, mat, weights):
             expert_slice = slice_[:, start:stop].t().contiguous()
         else:
             expert_slice = slice_[start:stop]
-        tensor[i * block_size:(i + 1) * block_size] = expert_slice.to(dtype=weights.dtype).to(device=weights.device)
+        tensor[i * block_size : (i + 1) * block_size] = expert_slice.to(
+            dtype=weights.dtype
+        ).to(device=weights.device)
     return tensor
 
 
 class MixtralAttention(torch.nn.Module):
     def __init__(
-            self,
-            prefix: str,
-            config,
-            weights,
+        self,
+        prefix: str,
+        config,
+        weights,
     ):
         super().__init__()
         self.max_past = (
@@ -210,7 +217,7 @@ class MixtralAttention(torch.nn.Module):
             device=weights.device,
         )
 
-        self.softmax_scale = self.head_size ** -0.5
+        self.softmax_scale = self.head_size**-0.5
 
         if self.num_heads % weights.process_group.size() != 0:
             raise ValueError(
@@ -219,7 +226,7 @@ class MixtralAttention(torch.nn.Module):
             )
         self.num_heads = self.num_heads // weights.process_group.size()
         self.num_key_value_heads = (
-                config.num_key_value_heads // weights.process_group.size()
+            config.num_key_value_heads // weights.process_group.size()
         )
 
         self.query_key_value = load_attention(config, prefix, weights)
@@ -236,17 +243,17 @@ class MixtralAttention(torch.nn.Module):
         ).repeat_interleave(self.num_groups)
 
     def forward(
-            self,
-            hidden_states,
-            cos,
-            sin,
-            cu_seqlen_prefill,
-            kv_cache,
-            block_tables,
-            slots,
-            input_lengths,
-            max_s,
-            prefill_cache_indices,
+        self,
+        hidden_states,
+        cos,
+        sin,
+        cu_seqlen_prefill,
+        kv_cache,
+        block_tables,
+        slots,
+        input_lengths,
+        max_s,
+        prefill_cache_indices,
     ):
         qkv = self.query_key_value(hidden_states)
         query, kv = qkv.split(
@@ -358,9 +365,9 @@ class BlockSparseMoE(nn.Module):
         self.gate = FastLinear.load(config, f"{prefix}.gate", weights, bias=False)
 
         # merged expert weights, all of size  (n_experts * ffn_dim, hidden_dim)
-        self.w1 = _load_experts(config, f"{prefix}.experts", "w1", weights).t()
+        self.w1 = _load_experts(config, f"{prefix}.experts", "w1", weights)
         self.w2 = _load_experts(config, f"{prefix}.experts", "w2", weights)
-        self.w3 = _load_experts(config, f"{prefix}.experts", "w3", weights).t()
+        self.w3 = _load_experts(config, f"{prefix}.experts", "w3", weights)
 
         self.offsets = None
         self.offsets_block_rows = 0
@@ -394,13 +401,14 @@ class BlockSparseMoE(nn.Module):
             self.offsets_block_rows = block_rows
             offsets = self.offsets
         else:
-            offsets = self.offsets[:block_rows]
+            offsets = self.offsets[: block_rows + 1]
 
         # Indices for the sparse matrix. The indices for
         # the intermediate matrix are dynamic depending
         # on the mapping of tokens to experts.
-        column_indices = ops.topology(padded_bins, self.blocking, block_rows,
-                                      blocks_per_row)
+        column_indices = ops.topology(
+            padded_bins, self.blocking, block_rows, blocks_per_row
+        )
 
         # For now, use meta init to save the device memory.
         data = torch.empty(
@@ -444,8 +452,7 @@ class BlockSparseMoE(nn.Module):
         # position of each bin.
 
         # List of size num_experts
-        padded_tokens_per_expert = round_up(tokens_per_expert,
-                                            self.blocking)
+        padded_tokens_per_expert = round_up(tokens_per_expert, self.blocking)
         # padded_tokens_per_expert => [128, O, 128, ...]
 
         # Cumulative selected experts per token
@@ -460,8 +467,7 @@ class BlockSparseMoE(nn.Module):
 
         return indices, bin_ids, bins, padded_bins, tokens_per_expert
 
-    @torch.inference_mode()
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def sparse_forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: (sequence_length, model_dim)
         gate_logits: (sequence_length, n_experts)
@@ -484,8 +490,7 @@ class BlockSparseMoE(nn.Module):
 
         # Permute tokens and pad to prepare expert computation
         # (top_k * sequence_length + padding, model_dim)
-        x = ops.padded_gather(x, indices, bin_ids, bins, padded_bins,
-                              self.top_k)
+        x = ops.padded_gather(x, indices, bin_ids, bins, padded_bins, self.top_k)
 
         # Create the sparse matrix topology
         with torch.no_grad():
@@ -496,8 +501,8 @@ class BlockSparseMoE(nn.Module):
         # (top_k * sequence_length + padding, ffn_dim * n_experts)
         x = stk.Matrix(
             topo.size(),
-            self.act(stk.ops.sdd(x, self.w1, topo).data) *
-            stk.ops.sdd(x, self.w3, topo).data,
+            self.act(stk.ops.sdd(x, self.w1.t(), topo).data)
+            * stk.ops.sdd(x, self.w3.t(), topo).data,
             topo.row_indices,
             topo.column_indices,
             topo.offsets,
@@ -528,6 +533,156 @@ class BlockSparseMoE(nn.Module):
 
         return x.view(*input_shape)
 
+    def dense_forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (sequence_length, model_dim)
+        gate_logits: (sequence_length, n_experts)
+        """
+        # optional reshape
+        input_shape = x.shape
+        x = x.view(-1, input_shape[-1])
+
+        # gate_logits: (sequence_length, n_experts)
+        gate_logits = self.gate(x)
+        # all_probs: (sequence_length, n_experts) and upcast for softmax
+        all_probs = torch.nn.functional.softmax(gate_logits, dim=1, dtype=torch.float)
+
+        if self.top_k < self.num_experts:
+            _, not_selected_experts = torch.topk(
+                all_probs,
+                self.num_experts - self.top_k,
+                largest=False,
+                sorted=False,
+                dim=1,
+            )
+            # Mask not selected experts
+            all_probs.scatter_(1, not_selected_experts, 0)
+
+        # Re-normalize
+        weights = all_probs / all_probs.sum(dim=1, keepdim=True)
+
+        # Expand to [num_experts, sequence_length, model_dim]
+        x = x.view(1, -1, input_shape[-1]).expand(self.num_experts, -1, input_shape[-1])
+
+        # Permute to [num_experts, model_dim, ffn_dim]
+        w1 = self.w1.view(self.num_experts, self.ffn_dim, self.hidden_dim).permute(
+            0, 2, 1
+        )
+        w3 = self.w3.view(self.num_experts, self.ffn_dim, self.hidden_dim).permute(
+            0, 2, 1
+        )
+
+        inter = self.act(torch.bmm(x, w1)) * torch.bmm(x, w3)
+
+        out = torch.bmm(
+            inter, self.w2.view(self.num_experts, self.ffn_dim, self.hidden_dim)
+        )
+        # Mask not selected experts
+        out *= weights.t().view(self.num_experts, -1, 1)
+
+        # Sum experts
+        out = out.sum(0)
+
+        # Reduce sum
+        if self.process_group.size() > 1:
+            torch.distributed.all_reduce(out, group=self.process_group)
+
+        return out
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if len(x) > 256:
+            return self.sparse_forward(x)
+        # This is faster when there is not a lot of tokens
+        return self.dense_forward(x)
+
+
+class DenseMoE(nn.Module):
+    def __init__(self, prefix, config: MixtralConfig, weights):
+        super().__init__()
+        self.hidden_dim = config.hidden_size
+        self.ffn_dim = config.intermediate_size // weights.process_group.size()
+        self.num_experts = config.num_local_experts
+        self.top_k = config.num_experts_per_tok
+
+        act = config.hidden_act
+        if "gelu" in act:
+            self.act = lambda x: torch.nn.functional.gelu(
+                x,
+                approximate="tanh"
+                if act in ["gelu_fast", "gelu_pytorch_tanh"]
+                else "none",
+            )
+        elif "silu" in act:
+            self.act = torch.nn.functional.silu
+        else:
+            self.act = ACT2FN[act]
+
+        # gating
+        self.gate = FastLinear.load(config, f"{prefix}.gate", weights, bias=False)
+
+        self.w1 = [
+            TensorParallelColumnLinear.load(
+                config, prefix=f"{prefix}.experts.{i}.w1", weights=weights, bias=False
+            )
+            for i in range(self.num_experts)
+        ]
+        self.w3 = [
+            TensorParallelColumnLinear.load(
+                config, prefix=f"{prefix}.experts.{i}.w3", weights=weights, bias=False
+            )
+            for i in range(self.num_experts)
+        ]
+        self.w2 = [
+            TensorParallelRowLinear.load(
+                config, prefix=f"{prefix}.experts.{i}.w2", weights=weights, bias=False
+            )
+            for i in range(self.num_experts)
+        ]
+
+        self.process_group = weights.process_group
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (sequence_length, model_dim)
+        gate_logits: (sequence_length, n_experts)
+        """
+        # optional reshape
+        input_shape = x.shape
+        x = x.view(-1, input_shape[-1])
+
+        # gate_logits: (sequence_length, n_experts)
+        gate_logits = self.gate(x)
+        # all_probs: (sequence_length, n_experts) and upcast for softmax
+        all_probs = torch.nn.functional.softmax(gate_logits, dim=1, dtype=torch.float)
+
+        if self.top_k < self.num_experts:
+            _, not_selected_experts = torch.topk(
+                all_probs,
+                self.num_experts - self.top_k,
+                largest=False,
+                sorted=False,
+                dim=1,
+            )
+            # Mask not selected experts
+            all_probs.scatter_(1, not_selected_experts, 0)
+
+        # Re-normalize
+        weights = all_probs / all_probs.sum(dim=1, keepdim=True)
+
+        # Final output tensor
+        out = x.new_zeros(x.shape[0], self.hidden_dim)
+        for i in range(self.num_experts):
+            h = self.act(self.w1[i](x)) * self.w3[i](x)
+            h = self.w2[i](h, reduce=False)
+            # Add expert output to out with masking
+            out += h * weights[:, i].view(-1, 1)
+
+        # Reduce sum
+        if self.process_group.size() > 1:
+            torch.distributed.all_reduce(out, group=self.process_group)
+
+        return out
+
 
 class MixtralLayer(nn.Module):
     def __init__(self, layer_id, config, weights):
@@ -537,7 +692,9 @@ class MixtralLayer(nn.Module):
         self.self_attn = MixtralAttention(
             prefix=f"{prefix}.self_attn", config=config, weights=weights
         )
-        self.block_sparse_moe = BlockSparseMoE(f"{prefix}.block_sparse_moe", config, weights)
+
+        moe_cls = BlockSparseMoE if config.quantize is None else DenseMoE
+        self.moe = moe_cls(f"{prefix}.block_sparse_moe", config, weights)
 
         self.input_layernorm = FastRMSNorm.load(
             prefix=f"{prefix}.input_layernorm", weights=weights, eps=config.rms_norm_eps
@@ -549,18 +706,18 @@ class MixtralLayer(nn.Module):
         )
 
     def forward(
-            self,
-            hidden_states,
-            residual,
-            cos,
-            sin,
-            cu_seqlen_prefill,
-            kv_cache,
-            block_tables,
-            slots,
-            input_lengths,
-            max_s,
-            prefill_cache_indices,
+        self,
+        hidden_states,
+        residual,
+        cos,
+        sin,
+        cu_seqlen_prefill,
+        kv_cache,
+        block_tables,
+        slots,
+        input_lengths,
+        max_s,
+        prefill_cache_indices,
     ):
         normed_hidden_states, res = self.input_layernorm(hidden_states, residual)
 
@@ -583,9 +740,9 @@ class MixtralLayer(nn.Module):
             attn_output, res
         )
 
-        block_sparse_moe_output = self.block_sparse_moe(normed_attn_res_output)
+        moe_output = self.moe(normed_attn_res_output)
 
-        return block_sparse_moe_output, attn_res
+        return moe_output, attn_res
 
 
 class MixtralModel(torch.nn.Module):
@@ -615,23 +772,24 @@ class MixtralModel(torch.nn.Module):
         self.num_key_value_heads = self.layers[0].self_attn.num_key_value_heads
 
     def forward(
-            self,
-            input_ids: torch.Tensor,
-            position_ids: torch.Tensor,
-            cu_seqlen_prefill: Optional[torch.Tensor],
-            kv_cache: List[Tuple[torch.Tensor, torch.Tensor]],
-            block_tables: torch.Tensor,
-            slots: torch.Tensor,
-            input_lengths: torch.Tensor,
-            max_s: int,
-            prefill_cache_indices: Optional[torch.Tensor],
+        self,
+        input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        cu_seqlen_prefill: Optional[torch.Tensor],
+        kv_cache: List[Tuple[torch.Tensor, torch.Tensor]],
+        block_tables: torch.Tensor,
+        slots: torch.Tensor,
+        input_lengths: torch.Tensor,
+        max_s: int,
+        true_max_s: int,
+        prefill_cache_indices: Optional[torch.Tensor],
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
 
         # Get rotary cos and sin for this forward
         # Avoid to index in each layer
         cos, sin = self.layers[0].self_attn.rotary_emb.get_cos_sin(
-            position_ids, max_s, hidden_states.dtype
+            position_ids, true_max_s, hidden_states.dtype
         )
 
         residual = None
@@ -666,26 +824,25 @@ class FlashMixtralForCausalLM(torch.nn.Module):
             weights=weights,
         )
         self.max_past = config.sliding_window
-        if self.max_past is None:
-            raise ValueError("max_past cannot be None")
 
     def forward(
-            self,
-            input_ids: torch.Tensor,
-            position_ids: torch.Tensor,
-            cu_seqlen_prefill: Optional[torch.Tensor],
-            kv_cache: List[Tuple[torch.Tensor, torch.Tensor]],
-            block_tables: torch.Tensor,
-            slots: torch.Tensor,
-            input_lengths: torch.Tensor,
-            max_s: int,
-            prefill_cache_indices: Optional[torch.Tensor],
-            lm_head_indices: Optional[torch.Tensor] = None,
+        self,
+        input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        cu_seqlen_prefill: Optional[torch.Tensor],
+        kv_cache: List[Tuple[torch.Tensor, torch.Tensor]],
+        block_tables: torch.Tensor,
+        slots: torch.Tensor,
+        input_lengths: torch.Tensor,
+        max_s: int,
+        prefill_cache_indices: Optional[torch.Tensor],
+        lm_head_indices: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        true_max_s = max_s
         if prefill_cache_indices is not None:
             # Slots also need to be sliced as it has the same size as the whole kv tensor
             slots = slots[prefill_cache_indices]
-        else:
+        elif self.max_past is not None:
             # Clamp in decode mode as paged attention requires clamped values whereas the flash attention
             # kernel requires the true values
             max_s = min(self.max_past, max_s)
@@ -700,6 +857,7 @@ class FlashMixtralForCausalLM(torch.nn.Module):
             slots,
             input_lengths,
             max_s,
+            true_max_s,
             prefill_cache_indices,
         )
         if lm_head_indices is not None:

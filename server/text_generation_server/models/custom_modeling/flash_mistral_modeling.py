@@ -27,7 +27,11 @@ from transformers.configuration_utils import PretrainedConfig
 from typing import Optional, List, Tuple
 
 from text_generation_server.utils import paged_attention, flash_attn
-from text_generation_server.utils.flash_attn import attention, HAS_FLASH_ATTN_V2_ROCM, HAS_FLASH_ATTN_V2_CUDA
+from text_generation_server.utils.flash_attn import (
+    attention,
+    HAS_FLASH_ATTN_V2_ROCM,
+    HAS_FLASH_ATTN_V2_CUDA,
+)
 from text_generation_server.utils.layers import (
     TensorParallelRowLinear,
     TensorParallelColumnLinear,
@@ -35,7 +39,7 @@ from text_generation_server.utils.layers import (
     PositionRotaryEmbedding,
     TensorParallelHead,
     get_linear,
-    FastRMSNorm
+    FastRMSNorm,
 )
 
 
@@ -95,6 +99,7 @@ class MistralConfig(PretrainedConfig):
             tie_word_embeddings=tie_word_embeddings,
             **kwargs,
         )
+
 
 def load_attention(config, prefix, weights):
     if config.num_attention_heads != config.num_key_value_heads:
@@ -386,6 +391,7 @@ class MistralModel(torch.nn.Module):
         slots: torch.Tensor,
         input_lengths: torch.Tensor,
         max_s: int,
+        true_max_s: int,
         prefill_cache_indices: Optional[torch.Tensor],
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
@@ -393,7 +399,7 @@ class MistralModel(torch.nn.Module):
         # Get rotary cos and sin for this forward
         # Avoid to index in each layer
         cos, sin = self.layers[0].self_attn.rotary_emb.get_cos_sin(
-            position_ids, max_s, hidden_states.dtype
+            position_ids, true_max_s, hidden_states.dtype
         )
 
         residual = None
@@ -428,8 +434,6 @@ class FlashMistralForCausalLM(torch.nn.Module):
             weights=weights,
         )
         self.max_past = config.sliding_window
-        if self.max_past is None:
-            raise ValueError("max_past cannot be None")
 
     def forward(
         self,
@@ -444,10 +448,11 @@ class FlashMistralForCausalLM(torch.nn.Module):
         prefill_cache_indices: Optional[torch.Tensor],
         lm_head_indices: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        true_max_s = max_s
         if prefill_cache_indices is not None:
             # Slots also need to be sliced as it has the same size as the whole kv tensor
             slots = slots[prefill_cache_indices]
-        else:
+        elif self.max_past is not None:
             # Clamp in decode mode as paged attention requires clamped values whereas the flash attention
             # kernel requires the true values
             max_s = min(self.max_past, max_s)
@@ -462,6 +467,7 @@ class FlashMistralForCausalLM(torch.nn.Module):
             slots,
             input_lengths,
             max_s,
+            true_max_s,
             prefill_cache_indices,
         )
         if lm_head_indices is not None:
