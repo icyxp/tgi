@@ -16,6 +16,7 @@ from text_generation_server.pb import generate_pb2_grpc, generate_pb2
 from text_generation_server.tracing import UDSOpenTelemetryAioServerInterceptor
 from text_generation_server.models.idefics_causal_lm import IdeficsCausalLMBatch
 
+
 class TextGenerationService(generate_pb2_grpc.TextGenerationServiceServicer):
     def __init__(self, model: Model, cache: Cache, server_urls: List[str]):
         self.cache = cache
@@ -54,9 +55,15 @@ class TextGenerationService(generate_pb2_grpc.TextGenerationServiceServicer):
         return generate_pb2.FilterBatchResponse(batch=filtered_batch.to_pb())
 
     async def Warmup(self, request, context):
-        if self.model.batch_type == IdeficsCausalLMBatch: #Hack, i would rather use kwargs in the `from_pb` call
+        if (
+            self.model.batch_type == IdeficsCausalLMBatch
+        ):  # Hack, i would rather use kwargs in the `from_pb` call
             batch = self.model.batch_type.from_pb(
-                request.batch, self.model.tokenizer, self.model.processor, self.model.dtype, self.model.device
+                request.batch,
+                self.model.tokenizer,
+                self.model.processor,
+                self.model.dtype,
+                self.model.device,
             )
         else:
             batch = self.model.batch_type.from_pb(
@@ -69,9 +76,15 @@ class TextGenerationService(generate_pb2_grpc.TextGenerationServiceServicer):
         )
 
     async def Prefill(self, request, context):
-        if self.model.batch_type == IdeficsCausalLMBatch: #Hack, i would rather use kwargs in the `from_pb` call
+        if (
+            self.model.batch_type == IdeficsCausalLMBatch
+        ):  # Hack, i would rather use kwargs in the `from_pb` call
             batch = self.model.batch_type.from_pb(
-                request.batch, self.model.tokenizer, self.model.processor, self.model.dtype, self.model.device
+                request.batch,
+                self.model.tokenizer,
+                self.model.processor,
+                self.model.dtype,
+                self.model.device,
             )
         else:
             batch = self.model.batch_type.from_pb(
@@ -119,6 +132,7 @@ def serve(
     revision: Optional[str],
     sharded: bool,
     quantize: Optional[str],
+    speculate: Optional[int],
     dtype: Optional[str],
     trust_remote_code: bool,
     uds_path: Path,
@@ -128,6 +142,7 @@ def serve(
         revision: Optional[str],
         sharded: bool = False,
         quantize: Optional[str] = None,
+        speculate: Optional[int] = None,
         dtype: Optional[str] = None,
         trust_remote_code: bool = False,
     ):
@@ -144,7 +159,7 @@ def serve(
 
         try:
             model = get_model(
-                model_id, revision, sharded, quantize, dtype, trust_remote_code
+                model_id, revision, sharded, quantize, speculate, dtype, trust_remote_code
             )
         except Exception:
             logger.exception("Error when initializing model")
@@ -192,5 +207,5 @@ def serve(
             await server.stop(0)
 
     asyncio.run(
-        serve_inner(model_id, revision, sharded, quantize, dtype, trust_remote_code)
+        serve_inner(model_id, revision, sharded, quantize, speculate, dtype, trust_remote_code)
     )
