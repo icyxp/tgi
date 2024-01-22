@@ -73,11 +73,11 @@ class FlashLlama(FlashCausalLM):
             import json
             import os
             from pathlib import Path
-
+            
             is_local_model = (Path(use_medusa).exists() and Path(use_medusa).is_dir()) or os.getenv(
                 "WEIGHTS_CACHE_OVERRIDE", None
             ) is not None
-
+            
             if not is_local_model:
                 medusa_config = hf_hub_download(
                     use_medusa, revision=revision, filename="config.json"
@@ -88,12 +88,16 @@ class FlashLlama(FlashCausalLM):
             else:
                 medusa_config = str(Path(use_medusa) / "config.json")
                 medusa_head = str(Path(use_medusa) / "medusa_lm_head.pt")
-            
-            medusa_sf = medusa_head[:-len(".pt")] + ".safetensors"
-            weights = Weights([medusa_sf], device, dtype, process_group=self.process_group)
+                
+            with open(medusa_config, "r") as f:
+                config = json.load(f)
+            medusa_sf = medusa_head[: -len(".pt")] + ".safetensors"
+            weights = Weights(
+                [medusa_sf], device, dtype, process_group=self.process_group
+            )
             lm_head = model.lm_head
             model.lm_head = MedusaModel(config, weights, lm_head)
-            
+
         torch.distributed.barrier(group=self.process_group)
         super(FlashLlama, self).__init__(
             model=model,
