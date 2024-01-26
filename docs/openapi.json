@@ -342,6 +342,135 @@
           }
         }
       }
+    },
+    "/tokenize": {
+      "post": {
+        "tags": [
+          "Text Generation Inference"
+        ],
+        "summary": "Tokenize inputs",
+        "description": "Tokenize inputs",
+        "operationId": "tokenize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Tokenized ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenizeResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No tokenizer found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": "No fast tokenizer available"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "Text Generation Inference"
+        ],
+        "summary": "Generate tokens",
+        "description": "Generate tokens",
+        "operationId": "chat_completions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Generated Text",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletionChunk"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Input validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": "Input validation error"
+                }
+              }
+            }
+          },
+          "424": {
+            "description": "Generation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": "Request failed during generation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Model is overloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": "Model is overloaded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Incomplete generation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": "Incomplete generation"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -367,7 +496,7 @@
             "type": "integer",
             "format": "int32",
             "example": 1,
-            "minimum": 0.0
+            "minimum": 0
           },
           "prefill": {
             "type": "array",
@@ -380,12 +509,21 @@
             "format": "int64",
             "example": 42,
             "nullable": true,
-            "minimum": 0.0
+            "minimum": 0
           },
           "tokens": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Token"
+            }
+          },
+          "top_tokens": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Token"
+              }
             }
           }
         }
@@ -432,7 +570,7 @@
             "type": "integer",
             "format": "int32",
             "example": 1,
-            "minimum": 0.0
+            "minimum": 0
           },
           "prefill": {
             "type": "array",
@@ -445,12 +583,21 @@
             "format": "int64",
             "example": 42,
             "nullable": true,
-            "minimum": 0.0
+            "minimum": 0
           },
           "tokens": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Token"
+            }
+          },
+          "top_tokens": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Token"
+              }
             }
           }
         }
@@ -486,8 +633,8 @@
             "default": "null",
             "example": 1,
             "nullable": true,
-            "minimum": 0.0,
-            "exclusiveMinimum": 0.0
+            "minimum": 0,
+            "exclusiveMinimum": 0
           },
           "decoder_input_details": {
             "type": "boolean",
@@ -505,10 +652,10 @@
           "max_new_tokens": {
             "type": "integer",
             "format": "int32",
-            "default": "20",
-            "minimum": 0.0,
-            "exclusiveMaximum": 512.0,
-            "exclusiveMinimum": 0.0
+            "default": "100",
+            "example": "20",
+            "nullable": true,
+            "minimum": 0
           },
           "repetition_penalty": {
             "type": "number",
@@ -516,7 +663,7 @@
             "default": "null",
             "example": 1.03,
             "nullable": true,
-            "exclusiveMinimum": 0.0
+            "exclusiveMinimum": 0
           },
           "return_full_text": {
             "type": "boolean",
@@ -530,8 +677,8 @@
             "default": "null",
             "example": "null",
             "nullable": true,
-            "minimum": 0.0,
-            "exclusiveMinimum": 0.0
+            "minimum": 0,
+            "exclusiveMinimum": 0
           },
           "stop": {
             "type": "array",
@@ -549,7 +696,7 @@
             "default": "null",
             "example": 0.5,
             "nullable": true,
-            "exclusiveMinimum": 0.0
+            "exclusiveMinimum": 0
           },
           "top_k": {
             "type": "integer",
@@ -557,7 +704,16 @@
             "default": "null",
             "example": 10,
             "nullable": true,
-            "exclusiveMinimum": 0.0
+            "exclusiveMinimum": 0
+          },
+          "top_n_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "default": "null",
+            "example": 5,
+            "nullable": true,
+            "minimum": 0,
+            "exclusiveMinimum": 0
           },
           "top_p": {
             "type": "number",
@@ -565,15 +721,15 @@
             "default": "null",
             "example": 0.95,
             "nullable": true,
-            "maximum": 1.0,
-            "exclusiveMinimum": 0.0
+            "maximum": 1,
+            "exclusiveMinimum": 0
           },
           "truncate": {
             "type": "integer",
             "default": "null",
             "example": "null",
             "nullable": true,
-            "minimum": 0.0
+            "minimum": 0
           },
           "typical_p": {
             "type": "number",
@@ -581,8 +737,8 @@
             "default": "null",
             "example": 0.95,
             "nullable": true,
-            "maximum": 1.0,
-            "exclusiveMinimum": 0.0
+            "maximum": 1,
+            "exclusiveMinimum": 0
           },
           "watermark": {
             "type": "boolean",
@@ -653,38 +809,38 @@
             "type": "integer",
             "format": "int32",
             "example": "32000",
-            "minimum": 0.0
+            "minimum": 0
           },
           "max_best_of": {
             "type": "integer",
             "example": "2",
-            "minimum": 0.0
+            "minimum": 0
           },
           "max_concurrent_requests": {
             "type": "integer",
             "description": "Router Parameters",
             "example": "128",
-            "minimum": 0.0
+            "minimum": 0
           },
           "max_input_length": {
             "type": "integer",
             "example": "1024",
-            "minimum": 0.0
+            "minimum": 0
           },
           "max_stop_sequences": {
             "type": "integer",
             "example": "4",
-            "minimum": 0.0
+            "minimum": 0
           },
           "max_total_tokens": {
             "type": "integer",
             "example": "2048",
-            "minimum": 0.0
+            "minimum": 0
           },
           "max_waiting_tokens": {
             "type": "integer",
             "example": "20",
-            "minimum": 0.0
+            "minimum": 0
           },
           "model_device_type": {
             "type": "string",
@@ -717,7 +873,7 @@
           "validation_workers": {
             "type": "integer",
             "example": "2",
-            "minimum": 0.0
+            "minimum": 0
           },
           "version": {
             "type": "string",
@@ -743,7 +899,7 @@
             "type": "integer",
             "format": "int32",
             "example": 0,
-            "minimum": 0.0
+            "minimum": 0
           },
           "logprob": {
             "type": "number",
@@ -771,20 +927,21 @@
             "type": "integer",
             "format": "int32",
             "example": 1,
-            "minimum": 0.0
+            "minimum": 0
           },
           "seed": {
             "type": "integer",
             "format": "int64",
             "example": 42,
             "nullable": true,
-            "minimum": 0.0
+            "minimum": 0
           }
         }
       },
       "StreamResponse": {
         "type": "object",
         "required": [
+          "index",
           "token"
         ],
         "properties": {
@@ -794,6 +951,7 @@
                 "$ref": "#/components/schemas/StreamDetails"
               }
             ],
+            "default": "null",
             "nullable": true
           },
           "generated_text": {
@@ -802,8 +960,19 @@
             "example": "test",
             "nullable": true
           },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
           "token": {
             "$ref": "#/components/schemas/Token"
+          },
+          "top_tokens": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Token"
+            }
           }
         }
       },
@@ -820,7 +989,7 @@
             "type": "integer",
             "format": "int32",
             "example": 0,
-            "minimum": 0.0
+            "minimum": 0
           },
           "logprob": {
             "type": "number",
