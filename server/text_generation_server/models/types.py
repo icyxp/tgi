@@ -66,7 +66,10 @@ class Tokens:
 
     def to_pb(self) -> generate_pb2.Tokens:
         return generate_pb2.Tokens(
-            ids=self.token_ids, logprobs=self.logprobs, texts=self.texts, is_special=self.is_special
+            ids=self.token_ids,
+            logprobs=self.logprobs,
+            texts=self.texts,
+            is_special=self.is_special,
         )
 
     def __len__(self):
@@ -92,5 +95,5 @@ class Generation:
             generated_text=self.generated_text.to_pb()
             if self.generated_text is not None
             else None,
-            top_tokens=self.top_tokens.to_pb() if self.top_tokens is not None else None,
+            top_tokens=[top_tokens.to_pb() for top_tokens in self.top_tokens] if self.top_tokens is not None else None,
         )

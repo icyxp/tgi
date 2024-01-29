@@ -252,7 +252,9 @@ def get_model(
 
     elif model_type == "phi-msft":
         if FLASH_ATTENTION:
-            raise NotImplementedError("Legacy phi-msft is not supported with Flash Attention")
+            raise NotImplementedError(
+                "Legacy phi-msft is not supported with Flash Attention"
+            )
         else:
             return Phi(
                 model_id,

@@ -640,10 +640,13 @@ class Seq2SeqLM(Model):
             batch.past_key_values,
         )
 
+        # Speculation is not active for seq2seq
+        accepted_ids = torch.ones_like(batch.decoder_input_ids)[:, 0]
         batch_top_token_ids, batch_top_token_logprobs = batch_top_tokens(
             batch.top_n_tokens,
             batch.top_n_tokens_tensor,
             torch.log_softmax(logits[:, -1], -1),
+            accepted_ids,
         )
 
         start_decode = time.time_ns()
@@ -740,26 +743,30 @@ class Seq2SeqLM(Model):
                         [self.tokenizer.bos_token_id],
                         [float("nan")],
                         [self.tokenizer.bos_token],
-                        [False]
+                        [False],
                     )
                 else:
                     prefill_tokens = None
 
                 if top_n_tokens > 0:
-                    toptoken_texts = self.tokenizer.batch_decode(
-                        top_token_ids,
-                        clean_up_tokenization_spaces=False,
-                        skip_special_tokens=False,
-                    )
-                    special_toptokens = [
-                        token_id in self.all_special_ids for token_id in top_token_ids
-                    ]
-                    top_tokens = Tokens(
-                        top_token_ids,
-                        top_token_logprobs,
-                        toptoken_texts,
-                        special_toptokens,
-                    )
+                    all_top_tokens = []
+                    for (top_token_ids, top_token_logprobs) in zip(top_token_ids, top_token_logprobs):
+                        toptoken_texts = self.tokenizer.batch_decode(
+                            top_token_ids,
+                            clean_up_tokenization_spaces=False,
+                            skip_special_tokens=False,
+                        )
+                        special_toptokens = [
+                            token_id in self.all_special_ids for token_id in top_token_ids
+                        ]
+                        top_tokens = Tokens(
+                            top_token_ids,
+                            top_token_logprobs,
+                            toptoken_texts,
+                            special_toptokens,
+                        )
+                        all_top_tokens.append(top_tokens)
+                    top_tokens = all_top_tokens
                 else:
                     top_tokens = None
 
@@ -767,10 +774,10 @@ class Seq2SeqLM(Model):
                     request.id,
                     prefill_tokens,
                     Tokens(
-                    [next_token_id_squeezed],
-                    [next_token_logprob],
-                    [next_token_text],
-                    [next_token_id_squeezed.item() in self.all_special_ids],
+                        [next_token_id_squeezed],
+                        [next_token_logprob],
+                        [next_token_text],
+                        [next_token_id_squeezed.item() in self.all_special_ids],
                     ),
                     generated_text,
                     top_tokens,

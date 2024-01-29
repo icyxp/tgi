@@ -5,7 +5,10 @@ from transformers import AutoConfig, AutoTokenizer
 from typing import Optional, List, Tuple
 
 from text_generation_server.models import CausalLM
-from text_generation_server.models.custom_modeling.phi_modeling import PhiConfig, PhiForCausalLM
+from text_generation_server.models.custom_modeling.phi_modeling import (
+    PhiConfig,
+    PhiForCausalLM,
+)
 from text_generation_server.utils import (
     initialize_torch_distributed,
     weight_files,
