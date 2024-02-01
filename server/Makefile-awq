@@ -2,15 +2,15 @@
 awq_commit := 3aed4bfed5b8343ff51430f11970a6601b5c7d19
 
 awq: 
-	rm -rf AutoAWQ_kernels
+	rm -rf awq_kernels
 	git config --global http.proxy http_proxy=http://172.16.0.1:8118
 	git config --global https.proxy http_proxy=http://172.16.0.1:8118
-	git clone https://github.com/casper-hansen/AutoAWQ_kernels.git
+	git clone https://github.com/casper-hansen/AutoAWQ_kernels.git awq_kernels
 
 build-awq: awq
-	cd AutoAWQ_kernels && git fetch && git checkout $(awq_commit)
-	cd AutoAWQ_kernels && python setup.py build
+	cd awq_kernels && git fetch && git checkout $(awq_commit)
+	cd awq_kernels && python setup.py build
 
 install-awq: build-awq
 	pip uninstall autoawq-kernels -y || true
-	cd AutoAWQ_kernels && python setup.py install
+	cd awq_kernels && python setup.py install
