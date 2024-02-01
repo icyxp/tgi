@@ -1,16 +1,16 @@
 #awq_commit := f084f40bd996f3cf3a0633c1ad7d9d476c318aaa
-awq_commit := 61b2cbf5337ff24fc4e464276a7d29e58aa716c5
+awq_commit := 3aed4bfed5b8343ff51430f11970a6601b5c7d19
 
 awq: 
-	rm -rf llm-awq
+	rm -rf AutoAWQ_kernels
 	git config --global http.proxy http_proxy=http://172.16.0.1:8118
 	git config --global https.proxy http_proxy=http://172.16.0.1:8118
-	git clone https://github.com/icyxp/llm-awq.git
+	git clone https://github.com/casper-hansen/AutoAWQ_kernels.git
 
 build-awq: awq
-	cd llm-awq/ && git fetch && git checkout $(awq_commit)
-	cd llm-awq/awq/kernels && python setup.py build
+	cd AutoAWQ_kernels && git fetch && git checkout $(awq_commit)
+	cd AutoAWQ_kernels && python setup.py build
 
 install-awq: build-awq
-	pip uninstall awq_inference_engine -y || true
-	cd llm-awq/awq/kernels && python setup.py install
+	pip uninstall autoawq-kernels -y || true
+	cd AutoAWQ_kernels && python setup.py install
