@@ -170,7 +170,7 @@ COPY --from=exllama-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-310 
 # Copy build artifacts from exllamav2 kernels builder
 COPY --from=exllamav2-kernels-builder /usr/src/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 # Copy build artifacts from awq kernels builder
-COPY --from=awq-kernels-builder /usr/src/llm-awq/awq/kernels/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
+COPY --from=awq-kernels-builder /usr/src/awq_kernels/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 # Copy build artifacts from eetq kernels builder
 COPY --from=eetq-kernels-builder /usr/src/eetq/build/lib.linux-x86_64-cpython-310 /opt/conda/lib/python3.10/site-packages
 
