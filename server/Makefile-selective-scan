@@ -17,6 +17,8 @@ install-causal-conv1d: build-causal-conv1d
 # selective-scan dependends on causal-conv1d
 selective-scan: 
 	rm -rf mamba
+	git config --global http.proxy http_proxy=http://172.16.0.1:8118
+	git config --global https.proxy http_proxy=http://172.16.0.1:8118
 	git clone https://github.com/state-spaces/mamba.git mamba
 
 build-selective-scan: selective-scan
