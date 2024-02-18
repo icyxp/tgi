@@ -1,36 +1,40 @@
 import torch
+import torch.distributed
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
+from typing import Optional
+from text_generation_server.models.custom_modeling.mamba_modeling import (
+    MambaConfig,
+)
+from text_generation_server.pb import generate_pb2
+from text_generation_server.utils import (
+    initialize_torch_distributed,
+    weight_files,
+    Weights,
+)
 import time
-
-from dataclasses import dataclass
-from opentelemetry import trace
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizerBase
-from typing import Optional, Tuple, List, Type, Dict
-
+from text_generation_server.models.custom_modeling.mamba_modeling import MambaModel
 from text_generation_server.models import Model
-from text_generation_server.utils.tokens import batch_top_tokens
+from typing import Any, List, Optional, Tuple, Type, Dict
 from text_generation_server.models.types import (
     Batch,
     Tokens,
     Generation,
     GeneratedText,
 )
-from text_generation_server.pb import generate_pb2
+from text_generation_server.utils.tokens import batch_top_tokens, Sampling
+from dataclasses import dataclass
 from text_generation_server.utils import NextTokenChooser, StoppingCriteria, Sampling
-
-tracer = trace.get_tracer(__name__)
+from mamba_ssm.utils.generation import InferenceParams
 
 
 @dataclass
-class CausalLMBatch(Batch):
+class MambaBatch(Batch):
     batch_id: int
     requests: List[generate_pb2.Request]
     requests_idx_mapping: Dict[int, int]
 
     # Decoder values
     input_ids: torch.Tensor
-    attention_mask: torch.Tensor
-    position_ids: torch.Tensor
-    past_key_values: Optional[List[Tuple]]
 
     # All tokens
     all_input_ids: List[torch.Tensor]
@@ -56,6 +60,9 @@ class CausalLMBatch(Batch):
     # Past metadata
     keys_head_dim_last: bool = True
 
+    # Inference params
+    inference_params: Optional[Dict[str, Any]] = None
+
     def to_pb(self) -> generate_pb2.CachedBatch:
         return generate_pb2.CachedBatch(
             id=self.batch_id,
@@ -71,7 +78,7 @@ class CausalLMBatch(Batch):
         tokenizer: PreTrainedTokenizerBase,
         dtype: torch.dtype,
         device: torch.device,
-    ) -> "CausalLMBatch":
+    ) -> "MambaBatch":
         inputs = []
         next_token_choosers = []
         stopping_criterias = []
@@ -114,32 +121,18 @@ class CausalLMBatch(Batch):
 
         input_lengths = tokenized_inputs["attention_mask"].sum(1)
         max_input_length = input_lengths.max()
-
         input_ids = tokenized_inputs["input_ids"]
-        # Allocate maximum attention_mask
-        attention_mask = input_ids.new_zeros(
-            (pb.size, max_input_length + padding_right_offset)
-        )
-        # Copy tokenizer attention_mask into fully allocated attention_mask
-        attention_mask[:, :max_input_length] = tokenized_inputs["attention_mask"]
-
-        position_ids = tokenized_inputs["attention_mask"].long().cumsum(-1) - 1
-        position_ids.masked_fill_(tokenized_inputs["attention_mask"] == 0, 1)
         all_input_ids = tokenized_inputs["input_ids"].T.split(1, dim=1)
         top_n_tokens_tensor = torch.tensor(
             top_n_tokens, device=device, dtype=torch.int64
         )
-
         max_tokens = len(inputs) * (max_input_length + max_decode_tokens)
-
         return cls(
             batch_id=pb.id,
             requests=pb.requests,
             requests_idx_mapping=requests_idx_mapping,
             input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=None,
+            # past_input_ids=None,
             all_input_ids=list(all_input_ids),
             input_lengths=input_lengths.tolist(),
             prefix_offsets=prefix_offsets,
@@ -153,8 +146,7 @@ class CausalLMBatch(Batch):
             max_tokens=max_tokens,
         )
 
-    @tracer.start_as_current_span("filter")
-    def filter(self, request_ids: List[int]) -> Optional["CausalLMBatch"]:
+    def filter(self, request_ids: List[int]) -> Optional["MambaBatch"]:
         if len(request_ids) == 0:
             raise ValueError("Batch must have at least one request")
         if len(request_ids) == len(self):
@@ -178,6 +170,7 @@ class CausalLMBatch(Batch):
         total_remaining_decode_tokens = 0
         new_padding_right_offset = 0
 
+        indices = []
         for i, request_id in enumerate(request_ids):
             idx = self.requests_idx_mapping[request_id]
             requests_idx_mapping[request_id] = i
@@ -191,6 +184,7 @@ class CausalLMBatch(Batch):
             request_input_length = self.input_lengths[idx]
             input_lengths.append(request_input_length)
             max_input_length = max(max_input_length, request_input_length)
+            indices.append(idx)
 
             next_token_choosers.append(self.next_token_choosers[idx])
             stopping_criteria = self.stopping_criterias[idx]
@@ -206,34 +200,6 @@ class CausalLMBatch(Batch):
 
         # Apply indices to input_ids, attention mask, past key values and other items that need to be cached
         input_ids = self.input_ids[keep_indices]
-        position_ids = self.position_ids[keep_indices]
-        self.attention_mask = self.attention_mask[
-            keep_indices,
-            -(self.padding_right_offset + max_input_length) : (
-                self.attention_mask.shape[1] - self.padding_right_offset
-            )
-            + new_padding_right_offset,
-        ]
-
-        # Ensure that past_key_values tensors can be updated in-place
-        if type(self.past_key_values[0]) == tuple:
-            self.past_key_values = [list(layer) for layer in self.past_key_values]
-
-        # Update tensors in-place to allow incremental garbage collection
-        past_kv_length = max_input_length - 1
-        for layer in self.past_key_values:
-            past_keys, past_values = layer
-            if len(past_keys.shape) == 3:
-                # Force past to be of dim [self_size, num_heads, ...] for easy indexing
-                past_keys = past_keys.view(len(self), -1, *past_keys.shape[-2:])
-                past_values = past_values.view(len(self), -1, *past_values.shape[-2:])
-            if self.keys_head_dim_last:
-                layer[0] = past_keys[keep_indices, :, -past_kv_length:, :]
-            else:
-                layer[0] = past_keys[keep_indices, :, :, -past_kv_length:]
-            del past_keys
-            layer[1] = past_values[keep_indices, :, -past_kv_length:, :]
-            del past_values
 
         top_n_tokens_tensor = self.top_n_tokens_tensor[keep_indices]
         max_tokens = len(request_ids) * max_input_length + total_remaining_decode_tokens
@@ -241,7 +207,6 @@ class CausalLMBatch(Batch):
         self.requests = requests
         self.requests_idx_mapping = requests_idx_mapping
         self.input_ids = input_ids
-        self.position_ids = position_ids
         self.all_input_ids = all_input_ids
         self.input_lengths = input_lengths
         self.prefix_offsets = prefix_offsets
@@ -254,11 +219,20 @@ class CausalLMBatch(Batch):
         self.padding_right_offset = new_padding_right_offset
         self.max_tokens = max_tokens
 
+        # TODO
+        # Kept it simple by just updating the state, maybe updating the other CPU values is necessary.
+        key_value_memory_dict = {}
+        for i, (
+            conv_state,
+            ssm_state,
+        ) in self.inference_params.key_value_memory_dict.items():
+            key_value_memory_dict[i] = (conv_state[indices], ssm_state[indices])
+        self.inference_params.key_value_memory_dict = key_value_memory_dict
+
         return self
 
     @classmethod
-    @tracer.start_as_current_span("concatenate")
-    def concatenate(cls, batches: List["CausalLMBatch"]) -> "CausalLMBatch":
+    def concatenate(cls, batches: List["MambaBatch"]) -> "MambaBatch":
         # Used for padding
         total_batch_size = 0
         max_input_length = 0
@@ -279,12 +253,12 @@ class CausalLMBatch(Batch):
         stopping_criterias = []
         top_n_tokens = []
         max_tokens = 0
+        max_seqlen = 0
+        batch_size = 0
+        seqlen_offset = 0
 
         # Batch tensors
         input_ids = None
-        attention_mask = None
-        position_ids = None
-        past_key_values = []
         top_n_tokens_tensor = None
 
         # Used for slicing correctly inside the tensors
@@ -310,10 +284,6 @@ class CausalLMBatch(Batch):
             # Slicing end index for this batch
             end_index = start_index + len(batch)
 
-            # We only concatenate batches that did at least one step
-            if batch.past_key_values is None:
-                raise ValueError("only concatenate prefilled batches")
-
             # Create empty tensor
             # input_ids is always of shape [batch_size, 1]
             # We do not need to pad it
@@ -322,140 +292,79 @@ class CausalLMBatch(Batch):
             # Copy to correct indices
             input_ids[start_index:end_index] = batch.input_ids
 
-            # Create padded tensor
-            if attention_mask is None:
-                attention_mask = batch.attention_mask.new_zeros(
-                    (total_batch_size, max_input_length + padding_right_offset),
-                )
-
             if top_n_tokens_tensor is None:
                 top_n_tokens_tensor = batches[0].top_n_tokens_tensor.new_zeros(
                     total_batch_size,
                 )
             top_n_tokens_tensor[start_index:end_index] = batch.top_n_tokens_tensor
 
-            # We need to slice the attention mask to remove padding from previous steps
-            # and to remove unused allocated space
-            left_offset = max_input_length - batch.max_input_length
-            batch_left_offset = (
-                batch.attention_mask.shape[1]
-                - batch.max_input_length
-                - batch.padding_right_offset
-            )
-            attention_mask[
-                start_index:end_index,
-                left_offset:-padding_right_offset,
-            ] = batch.attention_mask[
-                :,
-                batch_left_offset : -batch.padding_right_offset,
-            ]
-
-            # Create empty tensor
-            # position_ids is always of shape [batch_size, 1]
-            if position_ids is None:
-                position_ids = batch.position_ids.new_empty((total_batch_size, 1))
-            position_ids[start_index:end_index] = batch.position_ids
-
-            # Shenanigans to get dimensions because BLOOM outputs a past with a different shape
-            # BLOOM Keys:   [batch_size * num_heads, head_dim, seq_length]
-            # BLOOM Values: [batch_size * num_heads, seq_length, head_dim]
-            # And ensure that we can update tensors in-place
-            if type(batch.past_key_values[0]) == tuple:
-                batch.past_key_values = [
-                    [t.view(len(batch), -1, *t.shape[-2:]) for t in layer]
-                    for layer in batch.past_key_values
-                ]
-            elif len(batch.past_key_values[0][0].shape) == 3:
-                for layer in batch.past_key_values:
-                    for k, t in enumerate(layer):
-                        layer[k] = t.view(len(batch), -1, *t.shape[-2:])
-
             # Add eventual padding tokens that were added while concatenating
             max_tokens += batch.max_tokens + (
                 max_input_length - batch.max_input_length
             ) * len(batch)
 
+            max_seqlen = max(max_seqlen, batch.inference_params.max_seqlen)
+            seqlen_offset = max(seqlen_offset, batch.inference_params.seqlen_offset)
+            batch_size += batch.inference_params.max_batch_size
+
             start_index = end_index
 
-        first_past_kvs = batches[0].past_key_values
-        _, num_heads, padded_sequence_length, head_dim = first_past_kvs[0][1].shape
+        (_, d_model, d_conv) = (
+            batches[0].inference_params.key_value_memory_dict[0][0].shape
+        )
+        (_, _, d_state) = batches[0].inference_params.key_value_memory_dict[0][1].shape
+        n_blocks = len(batches[0].inference_params.key_value_memory_dict)
+        dtype = batches[0].inference_params.key_value_memory_dict[0][0].dtype
+        device = batches[0].inference_params.key_value_memory_dict[0][0].device
 
-        padded_past_values_shape = (
-            total_batch_size,
-            num_heads,
-            max_input_length - 1,
-            head_dim,
+        key_value_memory_dict = {}
+        for i in range(n_blocks):
+            conv_state = torch.zeros(
+                batch_size,
+                d_model,
+                d_conv,
+                device=device,
+                dtype=dtype,
+            )
+            ssm_state = torch.zeros(
+                batch_size,
+                d_model,
+                d_state,
+                device=device,
+                dtype=dtype,
+            )
+            key_value_memory_dict[i] = (conv_state, ssm_state)
+        lengths_per_sample = torch.zeros(batch_size, dtype=torch.int32, device=device)
+
+        inference_params = InferenceParams(
+            max_seqlen=max_seqlen,
+            max_batch_size=batch_size,
+            seqlen_offset=seqlen_offset,
+            key_value_memory_dict=key_value_memory_dict,
+            lengths_per_sample=lengths_per_sample,
         )
 
-        if batches[0].keys_head_dim_last:
-            padded_past_keys_shape = padded_past_values_shape
-        else:
-            # seq_length is last for BLOOM
-            padded_past_keys_shape = (
-                total_batch_size,
-                num_heads,
-                head_dim,
-                max_input_length - 1,
-            )
-
-        # Iterate over attention layers
-        # Concatenate past key values layer by layer to allow incremental garbage collection
-        for j in range(len(first_past_kvs)):
-            padded_past_keys = first_past_kvs[j][0].new_zeros(padded_past_keys_shape)
-            start_index = 0
-            for batch in batches:
-                past_keys = batch.past_key_values[j][0]
-                # Clear reference to the original tensor
-                batch.past_key_values[j][0] = None
-
-                # Slicing end index for this batch
-                end_index = start_index + len(batch)
-                # We slice the keys to remove the padding from previous batches
-                past_seq_len = batch.max_input_length - 1
-                if batch.keys_head_dim_last:
-                    padded_past_keys[
-                        start_index:end_index, :, -past_seq_len:, :
-                    ] = past_keys[:, :, -past_seq_len:, :]
-                else:
-                    # BLOOM case
-                    padded_past_keys[
-                        start_index:end_index, :, :, -past_seq_len:
-                    ] = past_keys[:, :, :, -past_seq_len:]
-                del past_keys
-
-                start_index = end_index
-
-            padded_past_values = first_past_kvs[j][1].new_zeros(
-                padded_past_values_shape
-            )
-            start_index = 0
-            for batch in batches:
-                past_values = batch.past_key_values[j][1]
-                # Clear reference to the original tensor
-                batch.past_key_values[j][1] = None
-
-                # Slicing end index for this batch
-                end_index = start_index + len(batch)
-                # We slice the past values to remove the padding from previous batches
-                past_seq_len = batch.max_input_length - 1
-                padded_past_values[
-                    start_index:end_index, :, -past_seq_len:, :
-                ] = past_values[:, :, -past_seq_len:, :]
-                del past_values
-
-                # Update values
-                start_index = end_index
-
-            past_key_values.append([padded_past_keys, padded_past_values])
+        current_batch = 0
+        for batch in batches:
+            for i in range(n_blocks):
+                conv_state, ssm_state = batch.inference_params.key_value_memory_dict[i]
+                batch_size = batch.inference_params.max_batch_size
+                inference_params.key_value_memory_dict[i][0][
+                    current_batch : current_batch + batch_size
+                ] = conv_state
+                inference_params.key_value_memory_dict[i][1][
+                    current_batch : current_batch + batch_size
+                ] = ssm_state
+                inference_params.lengths_per_sample[
+                    current_batch : current_batch + batch_size
+                ] = batch.inference_params.lengths_per_sample
+            current_batch += batch_size
 
         return cls(
             batch_id=batches[0].batch_id,
             requests=requests,
             requests_idx_mapping=requests_idx_mapping,
             input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
             all_input_ids=all_input_ids,
             input_lengths=input_lengths,
             prefix_offsets=prefix_offsets,
@@ -468,13 +377,14 @@ class CausalLMBatch(Batch):
             padding_right_offset=padding_right_offset,
             keys_head_dim_last=batches[0].keys_head_dim_last,
             max_tokens=max_tokens,
+            inference_params=inference_params,
         )
 
     def __len__(self):
         return len(self.requests)
 
 
-class CausalLM(Model):
+class Mamba(Model):
     def __init__(
         self,
         model_id: str,
@@ -483,6 +393,7 @@ class CausalLM(Model):
         dtype: Optional[torch.dtype] = None,
         trust_remote_code: bool = False,
     ):
+        self.process_group, _rank, _world_size = initialize_torch_distributed()
         if torch.cuda.is_available():
             device = torch.device("cuda")
             dtype = torch.float16 if dtype is None else dtype
@@ -494,40 +405,27 @@ class CausalLM(Model):
             dtype = torch.float32 if dtype is None else dtype
 
         tokenizer = AutoTokenizer.from_pretrained(
-            model_id,
+            "EleutherAI/gpt-neox-20b",
             revision=revision,
             padding_side="left",
             truncation_side="left",
             trust_remote_code=trust_remote_code,
         )
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            revision=revision,
-            torch_dtype=dtype,
-            device_map="auto"
-            if torch.cuda.is_available() and torch.cuda.device_count() > 1
-            else None,
-            load_in_8bit=quantize == "bitsandbytes",
-            trust_remote_code=trust_remote_code,
+        config = MambaConfig.from_pretrained(
+            model_id, revision=revision, trust_remote_code=trust_remote_code
         )
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.device_count() == 1
-            and quantize != "bitsandbytes"
-        ):
-            model = model.cuda()
 
-        if tokenizer.pad_token_id is None:
-            if model.config.pad_token_id is not None:
-                tokenizer.pad_token_id = model.config.pad_token_id
-            elif model.config.eos_token_id is not None:
-                tokenizer.pad_token_id = model.config.eos_token_id
-            elif tokenizer.eos_token_id is not None:
-                tokenizer.pad_token_id = tokenizer.eos_token_id
-            else:
-                tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+        tokenizer.bos_token_id = config.bos_token_id
+        tokenizer.eos_token_id = config.eos_token_id
+        tokenizer.pad_token = tokenizer.eos_token
 
-        super(CausalLM, self).__init__(
+        config.quantize = quantize
+        torch.distributed.barrier(group=self.process_group)
+        filenames = weight_files(model_id, revision=revision, extension=".safetensors")
+        weights = Weights(filenames, device, dtype, process_group=self.process_group)
+        model = MambaModel(config, weights)
+        torch.distributed.barrier(group=self.process_group)
+        super(Mamba, self).__init__(
             model=model,
             tokenizer=tokenizer,
             requires_padding=True,
@@ -536,46 +434,79 @@ class CausalLM(Model):
         )
 
     @property
-    def batch_type(self) -> Type[CausalLMBatch]:
-        return CausalLMBatch
+    def batch_type(self) -> Type[MambaBatch]:
+        return MambaBatch
 
-    def decode(self, generated_ids: List[int]) -> str:
-        return self.tokenizer.decode(
-            generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )
+    def warmup(self, batch) -> Optional[int]:
+        # TODO: implement warmup for Mamba if needed
+        return None
 
     def forward(
-        self, input_ids, attention_mask, position_ids, past_key_values: Optional = None
-    ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
-        # Model Forward
-        kwargs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "past_key_values": past_key_values,
-            "use_cache": True,
-            "return_dict": True,
-        }
-        if self.has_position_ids:
-            kwargs["position_ids"] = position_ids
-
-        outputs = self.model.forward(**kwargs)
-        return outputs.logits, outputs.past_key_values
-
-    @tracer.start_as_current_span("generate_token")
-    def generate_token(
-        self, batch: CausalLMBatch
-    ) -> Tuple[List[Generation], Optional[CausalLMBatch], Tuple[int, int]]:
-        start = time.time_ns()
-        # slice the attention mask to the correct shape
-        attention_mask = batch.attention_mask[:, : -batch.padding_right_offset]
-
-        logits, past = self.forward(
-            batch.input_ids,
-            attention_mask,
-            batch.position_ids,
-            batch.past_key_values,
+        self,
+        input_ids: torch.Tensor,
+        past: Optional[List[torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.model(
+            input_ids,
+            past=past,
         )
 
+    def generate_token(self, batch) -> Tuple[List[Any], Optional[Any], Tuple[int, int]]:
+        start = time.time_ns()
+        input_ids = (
+            batch.input_ids
+        )  # batch.past_input_ids if batch.past_input_ids is not None else batch.input_ids
+
+        batch_size = input_ids.shape[0]
+        max_seqlen = input_ids.shape[1]
+        dtype = input_ids.dtype
+
+        # Inference params
+        seqlen_og = 0
+        inf_cache = {}
+        lengths_per_sample = (
+            torch.ones(batch_size, dtype=torch.int32, device=input_ids.device)
+            * max_seqlen
+        )
+
+        if batch.inference_params is None:
+            inference_params = InferenceParams(
+                max_seqlen=max_seqlen,
+                max_batch_size=batch_size,
+                seqlen_offset=seqlen_og,
+                key_value_memory_dict=inf_cache,
+                lengths_per_sample=lengths_per_sample,
+            )
+
+            # Allocate inference cache
+            for res_block in self.model.blocks:
+                block = res_block.mamba_block
+                conv_state = torch.zeros(
+                    batch_size,
+                    self.model.config.d_model * self.model.config.expand,
+                    self.model.config.d_conv,
+                    device=block.conv1d.weight.device,
+                    dtype=block.conv1d.weight.dtype,
+                )
+                ssm_state = torch.zeros(
+                    batch_size,
+                    self.model.config.d_model * self.model.config.expand,
+                    self.model.config.d_state,
+                    device=block.dt_proj.weight.device,
+                    dtype=block.dt_proj.weight.dtype,
+                )
+                inference_params.key_value_memory_dict[block.layer_idx] = (
+                    conv_state,
+                    ssm_state,
+                )
+            batch.inference_params = inference_params
+
+        # Forward pass
+        logits, past_input_ids, new_inference_params = self.model(
+            input_ids, batch.inference_params
+        )
+
+        batch.inference_params = new_inference_params
         # Results
         generations: List[Generation] = []
         stopped = True
@@ -671,7 +602,6 @@ class CausalLM(Model):
                 else:
                     generated_text = None
 
-                # Prefill
                 if stopping_criteria.current_tokens == 1 and request.prefill_logprobs:
                     # Remove generated token to only have prefill and add nan for first prompt token
                     prefill_logprobs = [float("nan")] + torch.log_softmax(
@@ -695,27 +625,20 @@ class CausalLM(Model):
                     prefill_tokens = None
 
                 if top_n_tokens > 0:
-                    all_top_tokens = []
-                    for (top_token_ids, top_token_logprobs) in zip(
-                        top_token_ids, top_token_logprobs
-                    ):
-                        toptoken_texts = self.tokenizer.batch_decode(
-                            top_token_ids,
-                            clean_up_tokenization_spaces=False,
-                            skip_special_tokens=False,
-                        )
-                        special_toptokens = [
-                            token_id in self.all_special_ids
-                            for token_id in top_token_ids
-                        ]
-                        top_tokens = Tokens(
-                            top_token_ids,
-                            top_token_logprobs,
-                            toptoken_texts,
-                            special_toptokens,
-                        )
-                        all_top_tokens.append(top_tokens)
-                    top_tokens = all_top_tokens
+                    toptoken_texts = self.tokenizer.batch_decode(
+                        top_token_ids,
+                        clean_up_tokenization_spaces=False,
+                        skip_special_tokens=False,
+                    )
+                    special_toptokens = [
+                        token_id in self.all_special_ids for token_id in top_token_ids
+                    ]
+                    top_tokens = Tokens(
+                        top_token_ids,
+                        top_token_logprobs,
+                        toptoken_texts,
+                        special_toptokens,
+                    )
                 else:
                     top_tokens = None
 
@@ -734,13 +657,13 @@ class CausalLM(Model):
 
                 generations.append(generation)
 
-            # Update values
-            batch.input_ids[i, 0] = next_token_id
-            batch.all_input_ids[i] = all_input_ids
-            batch.input_lengths[i] = new_input_length
-            batch.prefix_offsets[i] = prefix_offset
-            batch.read_offsets[i] = read_offset
-            batch.max_input_length = max(batch.max_input_length, new_input_length)
+                # Update values
+                batch.input_ids[i, 0] = next_token_id
+                batch.all_input_ids[i] = all_input_ids
+                batch.input_lengths[i] = new_input_length
+                batch.prefix_offsets[i] = prefix_offset
+                batch.read_offsets[i] = read_offset
+                batch.max_input_length = max(batch.max_input_length, new_input_length)
 
         # We finished all generations in the batch; there is no next batch
         if stopped:
@@ -750,17 +673,6 @@ class CausalLM(Model):
 
         # Slice unused values from prefill
         batch.input_ids = batch.input_ids[:, :1]
-
-        # Update attention_mask as we added a new token to input_ids
-        batch.attention_mask[:, -batch.padding_right_offset] = 1
-        # Decrease right offset
-        batch.padding_right_offset -= 1
-
-        # Update position_ids
-        batch.position_ids = batch.position_ids[:, -1:] + 1
-
-        # Update past key values
-        batch.past_key_values = past
 
         forward_ns = start_decode - start
         decode_ns = time.time_ns() - start_decode
