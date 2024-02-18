@@ -1,5 +1,5 @@
-#awq_commit := f084f40bd996f3cf3a0633c1ad7d9d476c318aaa
-awq_commit := 3aed4bfed5b8343ff51430f11970a6601b5c7d19
+#awq_commit := 3aed4bfed5b8343ff51430f11970a6601b5c7d19
+awq_commit := 8714b16cd943421e624f10af8a35155d8518f139
 
 awq: 
 	rm -rf awq_kernels
