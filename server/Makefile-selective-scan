@@ -2,6 +2,8 @@ selective_scan_commit := 2a3704fd47ba817b415627b06fd796b971fdc137
 
 causal-conv1d:
 	rm -rf causal-conv1d
+	git config --global http.proxy http_proxy=http://172.16.0.1:8118
+	git config --global https.proxy http_proxy=http://172.16.0.1:8118
 	git clone https://github.com/Dao-AILab/causal-conv1d.git
 
 build-causal-conv1d: causal-conv1d
