@@ -13,7 +13,7 @@ from text_generation_server.utils import (
     weight_files,
     Weights,
 )
-from text_generation_server.models.globals import MEM_POOL
+from text_generation_server.models.globals import ENABLE_CUDA_GRAPHS, MEM_POOL
 import time
 from text_generation_server.models.custom_modeling.mamba_modeling import MambaModel, InferenceParams
 from text_generation_server.models import Model
@@ -124,7 +124,7 @@ class MambaBatch(Batch):
         for i, r in enumerate(pb.requests):
             requests_idx_mapping[r.id] = i
             inputs.append(r.inputs)
-            next_token_choosers.append(NextTokenChooser.from_pb(r.parameters, device))
+            next_token_choosers.append(NextTokenChooser.from_pb(r.parameters, device, tokenizer))
             stopping_criteria = StoppingCriteria.from_pb(
                 r.stopping_parameters, tokenizer
             )
@@ -377,7 +377,9 @@ class Mamba(Model):
         dtype: Optional[torch.dtype] = None,
         trust_remote_code: bool = False,
     ):
-        self.process_group, _rank, _world_size = initialize_torch_distributed()
+        self.process_group, _rank, world_size = initialize_torch_distributed()
+        if world_size > 1:
+            raise RuntimeError("Mamba does not support Tensor Parallelism (TP)")
         self.cuda_graphs = {}
         if torch.cuda.is_available():
             device = torch.device("cuda")
@@ -427,7 +429,7 @@ class Mamba(Model):
 
     def warmup(self, batch) -> Optional[int]:
         # TODO: implement warmup for Mamba if needed
-        if os.getenv("ENABLE_CUDA_GRAPHS", "False") == "True":
+        if ENABLE_CUDA_GRAPHS:
             if self.speculate is None or self.speculate == 0:
                 try:
                     logger.info("Experimental support for Cuda Graphs is enabled")
@@ -692,6 +694,9 @@ class Mamba(Model):
                 generations.append(generation)
 
                 # Update values
+                batch.next_token_choosers[i] = batch.next_token_choosers[i].advance_grammar(
+                    next_token_id_squeezed.item()
+                )
                 batch.input_ids[i, 0] = next_token_id
                 batch.all_input_ids[i] = all_input_ids
                 batch.input_lengths[i] = new_input_length

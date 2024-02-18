@@ -382,6 +382,11 @@ struct Args {
     #[clap(long, env)]
     tokenizer_config_path: Option<String>,
 
+    /// Disable outlines grammar constrained generation.
+    /// This is a feature that allows you to generate text that follows a specific grammar.
+    #[clap(long, env)]
+    disable_grammar_support: bool,
+
     /// Display a lot of information about your runtime environment
     #[clap(long, short, action)]
     env: bool,
@@ -1051,6 +1056,11 @@ fn spawn_webserver(
         args.model_id,
     ];
 
+    // Grammar support
+    if args.disable_grammar_support {
+        router_args.push("--disable-grammar-support".to_string());
+    }
+    
     // Tokenizer config path
     if let Some(ref tokenizer_config_path) = args.tokenizer_config_path {
         router_args.push("--tokenizer-config-path".to_string());
