@@ -20,6 +20,25 @@ pub(crate) type GenerateStreamResponse = (
     UnboundedReceiverStream<Result<InferStreamResponse, InferError>>,
 );
 
+#[derive(Clone, Deserialize, ToSchema)]
+pub(crate) struct VertexInstance {
+    #[schema(example = "What is Deep Learning?")]
+    pub inputs: String,
+    #[schema(nullable = true, default = "null", example = "null")]
+    pub parameters: Option<GenerateParameters>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct VertexRequest {
+    #[serde(rename = "instances")]
+    pub instances: Vec<VertexInstance>,
+}
+
+#[derive(Clone, Deserialize, ToSchema, Serialize)]
+pub(crate) struct VertexResponse {
+    pub predictions: Vec<String>,
+}
+
 /// Hub type
 #[derive(Clone, Debug, Deserialize)]
 pub struct HubModelInfo {
@@ -45,39 +64,16 @@ impl HubTokenizerConfig {
     }
 }
 
-mod json_object_or_string_to_string {
-    use serde::{Deserialize, Deserializer};
-    use serde_json::Value;
-
-    // A custom deserializer that treats both strings and objects as strings.
-    // This provides flexibility with input formats for the 'grammar' field.
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<String, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Value::deserialize(deserializer)?;
-
-        match value {
-            Value::String(s) => Ok(s),
-            // Safely handle serialization and return an error if it fails
-            Value::Object(o) => {
-                serde_json::to_string(&o).map_err(|e| serde::de::Error::custom(e.to_string()))
-            }
-            _ => Err(serde::de::Error::custom(
-                "expected string or object for grammar",
-            )),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, ToSchema)]
 #[serde(tag = "type", content = "value")]
 pub(crate) enum GrammarType {
-    #[serde(
-        rename = "json",
-        deserialize_with = "json_object_or_string_to_string::deserialize"
-    )]
-    Json(String),
+    /// A string that represents a [JSON Schema](https://json-schema.org/).
+    ///
+    /// JSON Schema is a declarative language that allows to annotate JSON documents
+    /// with types and descriptions.
+    #[serde(rename = "json")]
+    #[schema(example = json ! ({"properties": {"location":{"type": "string"}}}))]
+    Json(serde_json::Value),
     #[serde(rename = "regex")]
     Regex(String),
 }
@@ -153,7 +149,7 @@ pub struct Info {
     pub docker_label: Option<&'static str>,
 }
 
-#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, ToSchema, Default)]
 pub(crate) struct GenerateParameters {
     #[serde(default)]
     #[schema(exclusive_minimum = 0, nullable = true, default = "null", example = 1)]
@@ -351,7 +347,7 @@ pub(crate) struct ChatCompletionTopLogprob {
     logprob: f32,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, ToSchema)]
 pub(crate) struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,

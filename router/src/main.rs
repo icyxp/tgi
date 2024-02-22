@@ -270,7 +270,7 @@ async fn main() -> Result<(), RouterError> {
     let compat_return_full_text = match &model_info.pipeline_tag {
         None => {
             tracing::warn!("no pipeline tag found for model {tokenizer_name}");
-            false
+            true
         }
         Some(pipeline_tag) => pipeline_tag.as_str() == "text-generation",
     };
@@ -327,6 +327,15 @@ async fn main() -> Result<(), RouterError> {
     };
     tracing::info!("Setting max batch total tokens to {max_supported_batch_total_tokens}");
     tracing::info!("Connected");
+
+    // Determine the server port based on the feature and environment variable.
+    let port = if cfg!(feature = "google") {
+        std::env::var("AIP_HTTP_PORT")
+            .map(|aip_http_port| aip_http_port.parse::<u16>().unwrap_or(port))
+            .unwrap_or(port)
+    } else {
+        port
+    };
 
     let addr = match hostname.parse() {
         Ok(ip) => SocketAddr::new(ip, port),
