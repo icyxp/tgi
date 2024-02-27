@@ -9,6 +9,7 @@ from transformers.configuration_utils import PretrainedConfig
 import torch.nn.functional as F
 
 from text_generation_server.utils.layers import (
+    SpeculativeHead,
     TensorParallelEmbedding,
     FastRMSNorm,
     FastLinear,
@@ -19,10 +20,12 @@ from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
 import math
 from dataclasses import dataclass
 
+
 @dataclass
 class InferenceParams:
     """Inference parameters that are passed to the main model in order
     to efficienly calculate and store the context during inference."""
+
     max_seqlen: int
     max_batch_size: int
     conv_states: torch.Tensor
@@ -203,14 +206,12 @@ class MambaModel(nn.Module):
         self.norm_f = FastRMSNorm.load(
             f"{prefix}.norm_f", weights, eps=config.layer_norm_epsilon
         )
-        self.lm_head = FastLinear.load(
-            config, f"{prefix}.embedding", weights, bias=False
-        )
+        self.lm_head = SpeculativeHead.load(config, f"{prefix}.embedding", weights)
         self.config = config
 
     def forward(
         self, input_ids: torch.Tensor, inference_params=None, residual=None
-    ) -> Tuple[torch.Tensor, torch.Tensor, InferenceParams]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         hidden_states = self.embed_tokens(input_ids)
         for i, block in enumerate(self.blocks):
             hidden_states, residual, conv_state, ssm_state = block(
@@ -224,8 +225,8 @@ class MambaModel(nn.Module):
         )
         hidden_states, _ = self.norm_f(hidden_states.view(-1, hidden_states.size(-1)))
         hidden_states = hidden_states.view(residual.shape)
-        logits = self.lm_head(hidden_states)
+        logits, speculative_logits = self.lm_head(hidden_states)
 
         # update the offset for the next inference using these params
         inference_params.seqlen_offset += input_ids.size(1)
-        return logits
+        return logits, speculative_logits
