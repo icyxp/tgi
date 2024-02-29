@@ -22,7 +22,7 @@ except:
 class WQLinear(nn.Module):
     def __init__(self, w_bit, group_size, qweight, qzeros, scales, bias):
         super().__init__()
-
+        
         if w_bit not in [4]:
             raise NotImplementedError("Only 4-bit are supported for now.")
 
