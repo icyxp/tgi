@@ -128,12 +128,9 @@ class WQLinear(nn.Module):
     @torch.no_grad()
     def forward(self, x):
         out_shape = x.shape[:-1] + (self.out_features, )
-        input_dtype = x.dtype
-        if input_dtype != torch.float16:
-            x = x.half()
 
         if AWQ_INSTALLED:
-            FP16_MATMUL_HEURISTIC_CONDITION = x.shape[0]*x.shape[1] >= 1024
+            FP16_MATMUL_HEURISTIC_CONDITION = x.shape[:-1].numel() >= 256
 
             if FP16_MATMUL_HEURISTIC_CONDITION:
                 out = awq_ext.dequantize_weights_cuda(
@@ -159,9 +156,6 @@ class WQLinear(nn.Module):
                 self.group_size
             )
             out = torch.matmul(x, out)
-
-        if input_dtype != torch.float16:
-            out = out.to(dtype=input_dtype)
 
         out = out + self.bias if self.bias is not None else out
         return out.reshape(out_shape)   
