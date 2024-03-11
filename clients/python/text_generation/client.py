@@ -231,6 +231,9 @@ class Client:
                 Return the decoder input token logprobs and ids
             top_n_tokens (`int`):
                 Return the `n` most likely tokens at each step
+            grammar (`Grammar`):
+                Whether to use a grammar for the generation and the grammar to use. Grammars will constrain the generation
+                of the text to match a regular expression or JSON schema.
 
         Returns:
             Response: generated response
@@ -322,6 +325,9 @@ class Client:
                 Watermarking with [A Watermark for Large Language Models](https://arxiv.org/abs/2301.10226)
             top_n_tokens (`int`):
                 Return the `n` most likely tokens at each step
+            grammar (`Grammar`):
+                Whether to use a grammar for the generation and the grammar to use. Grammars will constrain the generation
+                of the text to match a regular expression or JSON schema.
 
         Returns:
             Iterator[StreamResponse]: stream of generated tokens
@@ -424,7 +430,7 @@ class AsyncClient:
         self.base_url = base_url
         self.headers = headers
         self.cookies = cookies
-        self.timeout = ClientTimeout(timeout * 60)
+        self.timeout = ClientTimeout(timeout)
 
     async def chat(
         self,
@@ -592,6 +598,9 @@ class AsyncClient:
                 Return the decoder input token logprobs and ids
             top_n_tokens (`int`):
                 Return the `n` most likely tokens at each step
+            grammar (`Grammar`):
+                Whether to use a grammar for the generation and the grammar to use. Grammars will constrain the generation
+                of the text to match a regular expression or JSON schema.
 
         Returns:
             Response: generated response
@@ -682,6 +691,9 @@ class AsyncClient:
                 Watermarking with [A Watermark for Large Language Models](https://arxiv.org/abs/2301.10226)
             top_n_tokens (`int`):
                 Return the `n` most likely tokens at each step
+            grammar (`Grammar`):
+                Whether to use a grammar for the generation and the grammar to use. Grammars will constrain the generation
+                of the text to match a regular expression or JSON schema.
 
         Returns:
             AsyncIterator[StreamResponse]: stream of generated tokens
